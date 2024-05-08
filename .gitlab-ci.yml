@@ -1,0 +1,29 @@
+image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/rust:1
+
+stages:
+  - build
+  - test
+
+variables:
+  # This will instruct Docker not to start over TLS.
+  DOCKER_TLS_CERTDIR: ""
+
+build:
+  stage: build
+  script:
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/ldap_keycloak_bridge
+    expire_in: 1 week
+    when: always
+  needs: []
+
+lint:
+  stage: test
+  script:
+    - rustup component add clippy
+    - cargo clippy -- -Dwarnings
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+  needs: []

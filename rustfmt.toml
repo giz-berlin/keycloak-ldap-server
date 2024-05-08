@@ -1,0 +1,5 @@
+array_width = 80
+# disabled as in nightly atm
+# comment_width = 100
+newline_style = "Unix"
+max_width = 160
