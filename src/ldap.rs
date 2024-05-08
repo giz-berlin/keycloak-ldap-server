@@ -122,14 +122,6 @@ impl LdapHandler {
             log::debug!("Session {} || Search: Found RootDSE", session_id);
             Ok(vec![sr.gen_result_entry(self.rootdse.new_search_result(&sr.attrs)), sr.gen_success()])
         } else {
-            // We want something else, apparently. Need to do some more work ...
-
-            // Note:
-            // We do not implement alias dereferencing
-            // We ignore the ctrl parameter.
-            // We do not have any operational attributes ("+")
-            // We do not honour the size limit imposed by the client or perform any pagination.
-
             let opt_value = match self.distinguished_name_regex.captures(sr.base.as_str()) {
                 Some(caps) => caps.name("val").map(|v| v.as_str().to_string()),
                 None => {

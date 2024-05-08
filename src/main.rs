@@ -20,16 +20,20 @@ use tokio::net::TcpListener;
 #[command(author, version)]
 /// Exposes a web API, used to do ?
 pub struct CliArguments {
-    #[clap(long, short, default_value = "[::1]:3000", help = "Bind address with port, e.g. [::1]:3000")]
+    #[clap(long, short, default_value = "0.0.0.0:3000", help = "Bind address with port")]
     bind_addr: String,
 
     #[clap(long, default_value = "dc=giz,dc=berlin", help = "The base point of our LDAP tree")]
     base_distinguished_name: String,
 
-    #[clap(long, default_value = "ldap.crt.pem", help = "The TLS certificate used by the LDAP server")]
+    #[clap(long, default_value = "ldap_keycloak_bridge.crt.pem", help = "The TLS certificate used by the LDAP server")]
     certificate: String,
 
-    #[clap(long, default_value = "ldap.key.pem", help = "The TLS certificate private key of the LDAP server")]
+    #[clap(
+        long,
+        default_value = "ldap_keycloak_bridge.key.pem",
+        help = "The TLS certificate private key of the LDAP server"
+    )]
     certificate_key: String,
 
     #[clap(long, default_value = "http://localhost:8080", help = "The address of the Keycloak server to fetch users from")]
