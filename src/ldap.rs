@@ -1,6 +1,7 @@
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::search::LdapEntry;
 use crate::{keycloak_service_account, proto, search};
 use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
 use regex::Regex;
@@ -121,6 +122,12 @@ impl LdapHandler {
         if sr.base.is_empty() && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found RootDSE", session_id);
             Ok(vec![sr.gen_result_entry(self.rootdse.new_search_result(&sr.attrs)), sr.gen_success()])
+        } else if sr.base.eq("cn=subschema") {
+            log::debug!("Session {} || Search: Found subschema definition", session_id);
+            Ok(vec![
+                sr.gen_result_entry(LdapEntry::subschema().new_search_result(&sr.attrs)),
+                sr.gen_success(),
+            ])
         } else {
             let opt_value = match self.distinguished_name_regex.captures(sr.base.as_str()) {
                 Some(caps) => caps.name("val").map(|v| v.as_str().to_string()),

@@ -7,8 +7,8 @@ use crate::ldap;
 use ldap3_proto::proto::LdapSubstringFilter;
 use regex::Regex;
 
-pub const FILTER_MAX_DEPTH: usize = 5;
-pub const FILTER_MAX_ELEMENTS: usize = 10;
+const FILTER_MAX_DEPTH: usize = 5;
+const FILTER_MAX_ELEMENTS: usize = 10;
 
 pub struct LdapEntry {
     pub dn: String,
@@ -31,10 +31,30 @@ impl LdapEntry {
     pub fn rootdse(base_distinguished_name: String) -> Self {
         let mut entry = Self::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
         entry.attributes.insert("namingContexts", vec![base_distinguished_name]);
-        entry.attributes.insert("supportedldapversion", vec!["3".to_string()]);
-        entry.attributes.insert("supportedextension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]); // WhoAmI
-        entry.attributes.insert("subschemaSubentry", vec!["cn=Subschema".to_string()]); // TODO make proper
+        entry.attributes.insert("supportedLDAPVersion", vec!["3".to_string()]);
+        // This is really just a dummy schema entry, see Self::subschema.
+        // However, we still provide it, as some client implementations may error (or at least omit
+        // a warning) if it is not present at all.
+        entry.attributes.insert("subschemaSubentry", vec!["cn=subschema".to_string()]);
+        entry.attributes.insert("vendorName", vec!["giz.berlin".to_string()]);
+        entry.attributes.insert("vendorVersion", vec!["LDAP Keycloak Bridge 1.0".to_string()]);
+        entry.attributes.insert("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]); // WhoAmI
         entry
+    }
+
+    pub fn subschema() -> Self {
+        // RFC 4512 says that this SHALL be specified by servers that permit modifications and is only
+        // RECOMMENDED for servers that do not.
+        // If we wanted to be fully standard-conform, we would need to list all object classes and
+        // attributes we support here, following the required syntax.
+        // As that's really tedious and probably unnecessary for this rather minimal service,
+        // we don't do that.
+        // Instead, we just return an empty schema and rely on the clients to hopefully
+        // use the default schema instead.
+        // Also, this type of objectclass appears to be one of the few ones that is not actually
+        // a subclass of top as constructed by Self::new. It still has an objectclass attribute, though,
+        // so that should be fine as well.
+        Self::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
     }
 
     pub fn organization(base_distinguished_name: String) -> Self {
