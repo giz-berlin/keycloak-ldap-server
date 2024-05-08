@@ -9,6 +9,15 @@ Note that the API does only support read operations and offers a limited subset 
 - We do not honour the size limit imposed by the client or perform any pagination.
 - We ignore the ctrl parameter.
 
+## Use Cases
+
+Currently, this service is intended to provide the following use cases:
+
+- providing a list of E-Mail addresses to printers
+- providing an address book, for example to mail clients
+- informing the NextCloud about active users, so that deactivated users can be removed
+- informing the locking system about user roles/group memberships
+
 ## Building
 
 First, the software needs to be build:
