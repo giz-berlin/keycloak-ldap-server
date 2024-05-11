@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::net;
 use std::pin::Pin;
 use std::sync;
+use std::time::Duration;
 
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
@@ -71,7 +72,14 @@ pub async fn _client_session(
     let mut ldap_reader = FramedRead::new(r, LdapCodec::default());
     let mut ldap_writer = FramedWrite::new(w, LdapCodec::default());
 
-    // Now that we have the session we begin an event loop to process input OR we return.
+    // For some reason, some client implementations (namely Apache Directory Studio) appear to just
+    // miss our first response if we are too fast :( It will then time out telling us we did not answer.
+    // Therefore, we just wait a little before we start processing the first message.
+    // This is the lowest delay value for which it appears to work reliably.
+    // After the first message exchange, the response listener of the client appears to be properly
+    // set up and no further delay is necessary.
+    tokio::time::sleep(Duration::from_millis(15)).await;
+
     while let Some(Ok(protomsg)) = ldap_reader.next().await {
         log::trace!(
             "Session {:?} || Got message from {} {}: {:?}",

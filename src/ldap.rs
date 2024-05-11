@@ -1,7 +1,5 @@
-use std::time::Duration;
 use uuid::Uuid;
 
-use crate::search::LdapEntry;
 use crate::{keycloak_service_account, proto, search};
 use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
 use regex::Regex;
@@ -59,8 +57,6 @@ impl LdapHandler {
     }
 
     pub async fn handle_request(&self, operation: ServerOps, session: &proto::LdapClientSession) -> LdapResponseState {
-        // TODO: For some reason, the client appears to miss our response if we are too fast...
-        tokio::time::sleep(Duration::from_millis(100)).await;
         match operation {
             ServerOps::SimpleBind(sbr) => self
                 .do_bind(&session.id, &sbr.dn, &sbr.pw)
@@ -125,7 +121,7 @@ impl LdapHandler {
         } else if sr.base.eq("cn=subschema") {
             log::debug!("Session {} || Search: Found subschema definition", session_id);
             Ok(vec![
-                sr.gen_result_entry(LdapEntry::subschema().new_search_result(&sr.attrs)),
+                sr.gen_result_entry(search::LdapEntry::subschema().new_search_result(&sr.attrs)),
                 sr.gen_success(),
             ])
         } else {
