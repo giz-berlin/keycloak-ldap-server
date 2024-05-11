@@ -45,6 +45,8 @@ impl Display for LdapClientSession {
     }
 }
 
+/// Initiate an LDAP session. Will capture any errors that occur while handling the session and
+/// convert them into log messages.
 pub async fn client_session(ldap: sync::Arc<ldap::LdapHandler>, tcpstream: TcpStream, tls_acceptor: SslAcceptor, client_address: net::SocketAddr) {
     let mut session = LdapClientSession::new();
     log::info!("Starting new client session {}", session);
@@ -54,6 +56,7 @@ pub async fn client_session(ldap: sync::Arc<ldap::LdapHandler>, tcpstream: TcpSt
     log::info!("Closing client session {}", session);
 }
 
+/// Handle receiving and sending of LDAP messages for a client session.
 pub async fn _client_session(
     session: &mut LdapClientSession,
     ldap: sync::Arc<ldap::LdapHandler>,
@@ -92,7 +95,7 @@ pub async fn _client_session(
         let operation_result = match ServerOps::try_from(protomsg) {
             Ok(server_op) => {
                 log::debug!("Session {}, msg {} || Performing operation {:?}", session, msg_id, server_op);
-                ldap.handle_request(server_op, session).await
+                ldap.perform_ldap_operation(server_op, session).await
             }
             Err(_) => ldap::LdapResponseState::Disconnect(DisconnectionNotice::gen(
                 LdapResultCode::ProtocolError,

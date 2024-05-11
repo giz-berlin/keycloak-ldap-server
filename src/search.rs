@@ -10,6 +10,7 @@ use regex::Regex;
 const FILTER_MAX_DEPTH: usize = 5;
 const FILTER_MAX_ELEMENTS: usize = 10;
 
+/// A data class representing an entry in our directory.
 pub struct LdapEntry {
     pub dn: String,
     attributes: HashMap<&'static str, Vec<String>>,
@@ -28,6 +29,7 @@ impl LdapEntry {
         entry
     }
 
+    /// The root-DSE: Provides meta-information on what functionality our server offers.
     pub fn rootdse(base_distinguished_name: String) -> Self {
         let mut entry = Self::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
         entry.attributes.insert("namingContexts", vec![base_distinguished_name]);
@@ -42,27 +44,31 @@ impl LdapEntry {
         entry
     }
 
+    /// The (dummy) schema specification that our server adheres to.
+    /// RFC 4512 says that this SHALL be specified by servers that permit modifications and is only
+    /// RECOMMENDED for servers that do not.
+    /// If we wanted to be fully standard-conform, we would need to list all object classes and
+    /// attributes we support here, following the required syntax.
+    /// As that's really tedious and probably unnecessary for this rather minimal service,
+    /// we don't do that.
+    /// Instead, we just return an empty schema and rely on the clients to hopefully
+    /// use the default schema instead.
     pub fn subschema() -> Self {
-        // RFC 4512 says that this SHALL be specified by servers that permit modifications and is only
-        // RECOMMENDED for servers that do not.
-        // If we wanted to be fully standard-conform, we would need to list all object classes and
-        // attributes we support here, following the required syntax.
-        // As that's really tedious and probably unnecessary for this rather minimal service,
-        // we don't do that.
-        // Instead, we just return an empty schema and rely on the clients to hopefully
-        // use the default schema instead.
-        // Also, this type of objectclass appears to be one of the few ones that is not actually
+        // This type of objectclass appears to be one of the few ones that is not actually
         // a subclass of top as constructed by Self::new. It still has an objectclass attribute, though,
         // so that should be fine as well.
         Self::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
     }
 
+    /// The root of our Directory Information Tree. Every entry is containing in the naming context
+    /// of our organization, meaning it will be a subordinate of this entry.
     pub fn organization(base_distinguished_name: String) -> Self {
         let mut entry = Self::new(base_distinguished_name.clone(), vec!["organization".to_string()], true);
         entry.attributes.insert("organizationName", vec!["giz.berlin".to_string()]);
         entry
     }
 
+    /// Convert a keycloak user to its corresponding LDAP representation.
     pub fn from_keycloak_user(user: UserRepresentation, base_distinguished_name: &String) -> Option<Self> {
         let user_id = user.id?;
         let dn = "cn=".to_owned() + &user_id + "," + base_distinguished_name;
@@ -96,6 +102,9 @@ impl LdapEntry {
         Some(entry)
     }
 
+    /// The client appears to have searched for this entry. Convert this entry into the data
+    /// format that will be sent over the wire, only including the attributes that the client requested.
+    /// Note that this method will NOT check whether this entry matches the filter specified by the client.
     pub fn new_search_result(&self, requested_attributes: &[String]) -> LdapSearchResultEntry {
         let all_requested = requested_attributes.is_empty() ||
             // We don't have any operational attributes, so this is equivalent
@@ -133,6 +142,8 @@ impl LdapEntry {
         result
     }
 
+    /// Check whether this entry matches the filter the client specified in its search.
+    /// Enforces some limits on how complex that filter is allowed to be.
     pub fn matches_filter(&self, f: &LdapFilter) -> Result<bool, ldap::LdapError> {
         let mut max_elements = FILTER_MAX_ELEMENTS;
         self._matches_filter(f, FILTER_MAX_DEPTH, &mut max_elements)
@@ -212,7 +223,7 @@ impl LdapEntry {
         }
     }
 
-    pub fn consume_resource(&self, resource: &mut usize, consumption_amount: usize) -> Result<(), ldap::LdapError> {
+    fn consume_resource(&self, resource: &mut usize, consumption_amount: usize) -> Result<(), ldap::LdapError> {
         *resource = resource
             .checked_sub(consumption_amount)
             .ok_or(ldap::LdapError(LdapResultCode::UnwillingToPerform, "Filter too expensive".to_string()))?;

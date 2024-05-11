@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     let handler = Arc::from(LdapHandler::new(
         args.base_distinguished_name,
         args.num_users,
-        keycloak_service_account::ServiceAccountBuilder::new(args.keycloak_address, args.keycloak_realm),
+        keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
     ));
 
     loop {

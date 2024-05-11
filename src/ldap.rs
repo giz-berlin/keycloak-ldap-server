@@ -14,7 +14,7 @@ pub struct LdapBindInfo {
     // The keycloak service account associated with the credentials passed by the client.
     // Allows us to query the keycloak for user-data.
     // The client will only be able to see data that the service account has access to.
-    pub keycloak_service_account: keycloak_service_account::ServiceAccount,
+    pub keycloak_service_account: keycloak_service_account::ServiceAccountClient,
 }
 
 pub enum LdapResponseState {
@@ -25,8 +25,11 @@ pub enum LdapResponseState {
     Disconnect(LdapMsg),
 }
 
+/// A handler capable of adhering to the LDAP protocol and properly perform LDAP operations.
+/// It knows how our DIT (directory information tree) looks like and how to bind clients by
+/// handing off the authentication decision to a Keycloak server.
 pub struct LdapHandler {
-    keycloak_service_account_builder: keycloak_service_account::ServiceAccountBuilder,
+    keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
     base_distinguished_name: String,
     rootdse: search::LdapEntry,
     organization_base_entry: search::LdapEntry,
@@ -38,7 +41,7 @@ impl LdapHandler {
     pub fn new(
         base_distinguished_name: String,
         num_users_to_fetch: i32,
-        keycloak_service_account_builder: keycloak_service_account::ServiceAccountBuilder,
+        keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
     ) -> Self {
         let distinguished_name_regex = Regex::new(format!("^((?P<attr>[^=]+)=(?P<val>[^=]+),)?{base_distinguished_name}$").as_str())
             // We are responsible for passing a valid name as configuration parameter
@@ -56,7 +59,9 @@ impl LdapHandler {
         }
     }
 
-    pub async fn handle_request(&self, operation: ServerOps, session: &proto::LdapClientSession) -> LdapResponseState {
+    /// Perform an LDAP operation, producing proper LDAP responses.
+    /// Errors occurring during the execution will be converted to LDAP error states.
+    pub async fn perform_ldap_operation(&self, operation: ServerOps, session: &proto::LdapClientSession) -> LdapResponseState {
         match operation {
             ServerOps::SimpleBind(sbr) => self
                 .do_bind(&session.id, &sbr.dn, &sbr.pw)
@@ -86,6 +91,11 @@ impl LdapHandler {
         }
     }
 
+    /// Perform an LDAP bind. We treat the credentials we receive as keycloak client credentials;
+    /// whether the bind succeeds will depend on whether these credentials can be actually used to
+    /// authenticate against keycloak.
+    /// Note that we disallow anonymous authentication, even though that might not be entirely
+    /// standard-conform.
     async fn do_bind(&self, session_id: &Uuid, dn: &str, pw: &str) -> Result<LdapBindInfo, LdapError> {
         if dn.is_empty() || pw.is_empty() {
             return Err(LdapError(
@@ -114,11 +124,13 @@ impl LdapHandler {
         }
     }
 
+    /// Perform an LDAP search. As our LDAP tree is rather shallow, we hard-code the search logic
+    /// to match exactly the few LDAP entries we can deal with.
     async fn do_search(&self, session_id: &Uuid, sr: &SearchRequest, bound_user: &LdapBindInfo) -> Result<Vec<LdapMsg>, LdapError> {
         if sr.base.is_empty() && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found RootDSE", session_id);
             Ok(vec![sr.gen_result_entry(self.rootdse.new_search_result(&sr.attrs)), sr.gen_success()])
-        } else if sr.base.eq("cn=subschema") {
+        } else if sr.base.eq("cn=subschema") && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found subschema definition", session_id);
             Ok(vec![
                 sr.gen_result_entry(search::LdapEntry::subschema().new_search_result(&sr.attrs)),
