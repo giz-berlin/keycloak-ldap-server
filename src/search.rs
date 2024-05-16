@@ -2,6 +2,7 @@ use keycloak::types::UserRepresentation;
 use ldap3_proto::{LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
 use std::collections::HashMap;
 use std::string::ToString;
+use anyhow::Context;
 
 use crate::ldap;
 use ldap3_proto::proto::LdapSubstringFilter;
@@ -10,29 +11,57 @@ use regex::Regex;
 const FILTER_MAX_DEPTH: usize = 5;
 const FILTER_MAX_ELEMENTS: usize = 10;
 
-/// A data class representing an entry in our directory.
-pub struct LdapEntry {
-    pub dn: String,
-    attributes: HashMap<&'static str, Vec<String>>,
-    has_subordinates: bool,
+/// An interface fur customizing which attributes of a Keycloak user should be added to the
+/// corresponding LDAP entry.
+pub trait KeycloakUserAttributeExtractor: Send + Sync { // Trait bound in order to pass impls to async functions
+    /// Add the desired user attributes to the keycloak entry.
+    fn extract(&self, user: UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
 }
 
-impl LdapEntry {
-    fn new(dn: String, mut class: Vec<String>, has_subordinates: bool) -> Self {
-        let mut entry = LdapEntry {
-            dn,
-            attributes: HashMap::new(),
-            has_subordinates,
-        };
-        class.push("top".to_string()); // Every entry belongs to this class
-        entry.attributes.insert("objectClass", class);
-        entry
+pub struct PrinterUserAttributeExtractor {}
+
+impl KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
+    fn extract(&self, user: UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
+        ldap_entry.attributes.insert("cn", vec![user.id.context("user id missing")?]);
+        ldap_entry.attributes.insert("displayName", vec![user.username.context("username missing")?]);
+        ldap_entry.attributes.insert("givenName", vec![user.first_name.unwrap_or("".to_string())]);
+        ldap_entry.attributes.insert(
+            "surname",
+            vec![
+                // We would really like to have a name for the user so that the client can know who they
+                // are dealing with.
+                user.last_name.context("last name missing")?,
+            ],
+        );
+        ldap_entry.attributes.insert(
+            "mail",
+            vec![
+                // A user without a mail is not very useful in our case.
+                user.email.context("email missing")?,
+            ],
+        );
+
+        Ok(())
+    }
+}
+
+pub struct LdapEntryBuilder {
+    base_distinguished_name: String,
+    extractor: Box<dyn KeycloakUserAttributeExtractor>
+}
+
+impl LdapEntryBuilder {
+    pub fn new(base_distinguished_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
+        Self {
+            base_distinguished_name,
+            extractor
+        }
     }
 
     /// The root-DSE: Provides meta-information on what functionality our server offers.
-    pub fn rootdse(base_distinguished_name: String) -> Self {
-        let mut entry = Self::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
-        entry.attributes.insert("namingContexts", vec![base_distinguished_name]);
+    pub fn rootdse(&self) -> LdapEntry {
+        let mut entry = LdapEntry::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
+        entry.attributes.insert("namingContexts", vec![self.base_distinguished_name.clone()]);
         entry.attributes.insert("supportedLDAPVersion", vec!["3".to_string()]);
         // This is really just a dummy schema entry, see Self::subschema.
         // However, we still provide it, as some client implementations may error (or at least omit
@@ -53,26 +82,26 @@ impl LdapEntry {
     /// we don't do that.
     /// Instead, we just return an empty schema and rely on the clients to hopefully
     /// use the default schema instead.
-    pub fn subschema() -> Self {
+    pub fn subschema(&self) -> LdapEntry {
         // This type of objectclass appears to be one of the few ones that is not actually
         // a subclass of top as constructed by Self::new. It still has an objectclass attribute, though,
         // so that should be fine as well.
-        Self::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
+        LdapEntry::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
     }
 
     /// The root of our Directory Information Tree. Every entry is containing in the naming context
     /// of our organization, meaning it will be a subordinate of this entry.
-    pub fn organization(base_distinguished_name: String) -> Self {
-        let mut entry = Self::new(base_distinguished_name.clone(), vec!["organization".to_string()], true);
+    pub fn organization(&self) -> LdapEntry {
+        let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()], true);
         entry.attributes.insert("organizationName", vec!["giz.berlin".to_string()]);
         entry
     }
 
     /// Convert a keycloak user to its corresponding LDAP representation.
-    pub fn from_keycloak_user(user: UserRepresentation, base_distinguished_name: &String) -> Option<Self> {
-        let user_id = user.id?;
-        let dn = "cn=".to_owned() + &user_id + "," + base_distinguished_name;
-        let mut entry = Self::new(
+    pub fn build_from_keycloak_user(&self, user: UserRepresentation) -> Option<LdapEntry> {
+        let user_id = user.id.clone()?;
+        let dn = "cn=".to_owned() + &user_id + "," + &self.base_distinguished_name;
+        let mut entry = LdapEntry::new(
             dn,
             vec![
                 "inetOrgPerson".to_string(),
@@ -81,25 +110,29 @@ impl LdapEntry {
             ],
             false,
         );
-        entry.attributes.insert("cn", vec![user_id]);
-        entry.attributes.insert("displayName", vec![user.username?]);
-        entry.attributes.insert("givenName", vec![user.first_name.unwrap_or("".to_string())]);
-        entry.attributes.insert(
-            "surname",
-            vec![
-                // We would really like to have a name for the user so that the client can know who they
-                // are dealing with.
-                user.last_name?,
-            ],
-        );
-        entry.attributes.insert(
-            "mail",
-            vec![
-                // A user without a mail is not very useful in our case.
-                user.email?,
-            ],
-        );
+        self.extractor.extract(user, &mut entry).ok()?;
+
         Some(entry)
+    }
+}
+
+/// A data class representing an entry in our directory.
+pub struct LdapEntry {
+    pub dn: String,
+    pub attributes: HashMap<&'static str, Vec<String>>,
+    has_subordinates: bool,
+}
+
+impl LdapEntry {
+    pub fn new(dn: String, mut class: Vec<String>, has_subordinates: bool) -> Self {
+        let mut entry = LdapEntry {
+            dn,
+            attributes: HashMap::new(),
+            has_subordinates,
+        };
+        class.push("top".to_string()); // Every entry belongs to this class
+        entry.attributes.insert("objectClass", class);
+        entry
     }
 
     /// The client appears to have searched for this entry. Convert this entry into the data

@@ -30,11 +30,9 @@ pub enum LdapResponseState {
 /// handing off the authentication decision to a Keycloak server.
 pub struct LdapHandler {
     keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
-    base_distinguished_name: String,
-    rootdse: search::LdapEntry,
-    organization_base_entry: search::LdapEntry,
     num_users_to_fetch: i32,
     distinguished_name_regex: Regex,
+    ldap_entry_builder: search::LdapEntryBuilder
 }
 
 impl LdapHandler {
@@ -42,20 +40,17 @@ impl LdapHandler {
         base_distinguished_name: String,
         num_users_to_fetch: i32,
         keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
+        ldap_entry_builder: search::LdapEntryBuilder
     ) -> Self {
         let distinguished_name_regex = Regex::new(format!("^((?P<attr>[^=]+)=(?P<val>[^=]+),)?{base_distinguished_name}$").as_str())
             // We are responsible for passing a valid name as configuration parameter
             .unwrap();
-        let rootdse = search::LdapEntry::rootdse(base_distinguished_name.clone());
-        let organization_base_entry = search::LdapEntry::organization(base_distinguished_name.clone());
 
         LdapHandler {
             keycloak_service_account_builder,
-            base_distinguished_name,
-            rootdse,
-            organization_base_entry,
             num_users_to_fetch,
             distinguished_name_regex,
+            ldap_entry_builder
         }
     }
 
@@ -129,11 +124,11 @@ impl LdapHandler {
     async fn do_search(&self, session_id: &Uuid, sr: &SearchRequest, bound_user: &LdapBindInfo) -> Result<Vec<LdapMsg>, LdapError> {
         if sr.base.is_empty() && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found RootDSE", session_id);
-            Ok(vec![sr.gen_result_entry(self.rootdse.new_search_result(&sr.attrs)), sr.gen_success()])
+            Ok(vec![sr.gen_result_entry(self.ldap_entry_builder.rootdse().new_search_result(&sr.attrs)), sr.gen_success()])
         } else if sr.base.eq("cn=subschema") && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found subschema definition", session_id);
             Ok(vec![
-                sr.gen_result_entry(search::LdapEntry::subschema().new_search_result(&sr.attrs)),
+                sr.gen_result_entry(self.ldap_entry_builder.subschema().new_search_result(&sr.attrs)),
                 sr.gen_success(),
             ])
         } else {
@@ -166,13 +161,13 @@ impl LdapHandler {
                 }
             }
             .into_iter()
-            .filter_map(|user| search::LdapEntry::from_keycloak_user(user, &self.base_distinguished_name))
+            .filter_map(|user| self.ldap_entry_builder.build_from_keycloak_user(user))
             .collect();
 
             match opt_value {
                 None => {
                     if sr.scope == LdapSearchScope::Base || sr.scope == LdapSearchScope::Subtree {
-                        add_search_result_on_filter_match(&sr.filter, &self.organization_base_entry)?
+                        add_search_result_on_filter_match(&sr.filter, &self.ldap_entry_builder.organization())?
                     }
                     if sr.scope != LdapSearchScope::Base {
                         for user in users {

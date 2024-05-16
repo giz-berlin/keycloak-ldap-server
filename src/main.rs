@@ -64,9 +64,10 @@ async fn main() -> anyhow::Result<()> {
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
     let handler = Arc::from(LdapHandler::new(
-        args.base_distinguished_name,
+        args.base_distinguished_name.clone(),
         args.num_users,
         keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
+        search::LdapEntryBuilder::new(args.base_distinguished_name, Box::new(search::PrinterUserAttributeExtractor{}))
     ));
 
     loop {
