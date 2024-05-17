@@ -14,7 +14,7 @@ build:
     - cargo build --release
   artifacts:
     paths:
-      - target/release/ldap_keycloak_bridge
+      - target/release/printer-ldap
     expire_in: 1 week
     when: always
   needs: []

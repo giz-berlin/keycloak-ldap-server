@@ -13,10 +13,27 @@ Note that the API does only support read operations and offers a limited subset 
 
 Currently, this service is intended to provide the following use cases:
 
-- providing a list of E-Mail addresses to printers
+- [implemented] providing a list of E-Mail addresses to printers
 - providing an address book, for example to mail clients
 - informing the NextCloud about active users, so that deactivated users can be removed
 - informing the locking system about user roles/group memberships
+
+### Creating a binary for a new use case
+
+To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
+and add it to the [workspace members](Cargo.toml).
+There, you should create a new implementation of the `giz-ldap-lib::search::KeycloakUserAttributeExtractor` trait, which allows you to configure
+which Keycloak user attributes will be exposed by the LDAP user entries.
+
+As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
+```rust
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{})).await
+}
+```
+
+See [the printer-specific implementation](printer-ldap) for an example.
 
 ## Building
 
@@ -38,10 +55,12 @@ For production, you should request a certificate for example using [LetsEncrypt]
 The API can be started by running
 
 ```bash
-target/release/ldap_keycloak_bridge
+target/release/{target_binary}
 ```
 
-It should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, use the `--help` flag.
+where `target_binary` is one of the use-case specific binaries build, for example `printer-ldap`.
+
+The API should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, use the `--help` flag.
 
 If you want to run the API under the typical LDAPS port (636), you will need to have root permissions or
 [use some other way to bind to a privileged port](https://stackoverflow.com/questions/413807/is-there-a-way-for-non-root-processes-to-bind-to-privileged-ports-on-linux).

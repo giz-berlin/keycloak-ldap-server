@@ -2,9 +2,8 @@ use keycloak::types::UserRepresentation;
 use ldap3_proto::{LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
 use std::collections::HashMap;
 use std::string::ToString;
-use anyhow::Context;
 
-use crate::ldap;
+use crate::proto;
 use ldap3_proto::proto::LdapSubstringFilter;
 use regex::Regex;
 
@@ -13,48 +12,22 @@ const FILTER_MAX_ELEMENTS: usize = 10;
 
 /// An interface fur customizing which attributes of a Keycloak user should be added to the
 /// corresponding LDAP entry.
-pub trait KeycloakUserAttributeExtractor: Send + Sync { // Trait bound in order to pass impls to async functions
+// Trait bound in order to pass impls to async functions
+pub trait KeycloakUserAttributeExtractor: Send + Sync {
     /// Add the desired user attributes to the keycloak entry.
     fn extract(&self, user: UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
 }
 
-pub struct PrinterUserAttributeExtractor {}
-
-impl KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
-    fn extract(&self, user: UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
-        ldap_entry.attributes.insert("cn", vec![user.id.context("user id missing")?]);
-        ldap_entry.attributes.insert("displayName", vec![user.username.context("username missing")?]);
-        ldap_entry.attributes.insert("givenName", vec![user.first_name.unwrap_or("".to_string())]);
-        ldap_entry.attributes.insert(
-            "surname",
-            vec![
-                // We would really like to have a name for the user so that the client can know who they
-                // are dealing with.
-                user.last_name.context("last name missing")?,
-            ],
-        );
-        ldap_entry.attributes.insert(
-            "mail",
-            vec![
-                // A user without a mail is not very useful in our case.
-                user.email.context("email missing")?,
-            ],
-        );
-
-        Ok(())
-    }
-}
-
-pub struct LdapEntryBuilder {
+pub(crate) struct LdapEntryBuilder {
     base_distinguished_name: String,
-    extractor: Box<dyn KeycloakUserAttributeExtractor>
+    extractor: Box<dyn KeycloakUserAttributeExtractor>,
 }
 
 impl LdapEntryBuilder {
     pub fn new(base_distinguished_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
         Self {
             base_distinguished_name,
-            extractor
+            extractor,
         }
     }
 
@@ -177,12 +150,12 @@ impl LdapEntry {
 
     /// Check whether this entry matches the filter the client specified in its search.
     /// Enforces some limits on how complex that filter is allowed to be.
-    pub fn matches_filter(&self, f: &LdapFilter) -> Result<bool, ldap::LdapError> {
+    pub fn matches_filter(&self, f: &LdapFilter) -> Result<bool, proto::LdapError> {
         let mut max_elements = FILTER_MAX_ELEMENTS;
         self._matches_filter(f, FILTER_MAX_DEPTH, &mut max_elements)
     }
 
-    fn _matches_filter(&self, f: &LdapFilter, depth: usize, elems: &mut usize) -> Result<bool, ldap::LdapError> {
+    fn _matches_filter(&self, f: &LdapFilter, depth: usize, elems: &mut usize) -> Result<bool, proto::LdapError> {
         let mut new_depth = depth;
         self.consume_resource(&mut new_depth, 1)?;
         match f {
@@ -251,15 +224,15 @@ impl LdapEntry {
             }
             _ => {
                 log::error!("Unsupported filter operation");
-                Err(ldap::LdapError(LdapResultCode::UnwillingToPerform, "Operation not implemented".to_string()))
+                Err(proto::LdapError(LdapResultCode::UnwillingToPerform, "Operation not implemented".to_string()))
             }
         }
     }
 
-    fn consume_resource(&self, resource: &mut usize, consumption_amount: usize) -> Result<(), ldap::LdapError> {
+    fn consume_resource(&self, resource: &mut usize, consumption_amount: usize) -> Result<(), proto::LdapError> {
         *resource = resource
             .checked_sub(consumption_amount)
-            .ok_or(ldap::LdapError(LdapResultCode::UnwillingToPerform, "Filter too expensive".to_string()))?;
+            .ok_or(proto::LdapError(LdapResultCode::UnwillingToPerform, "Filter too expensive".to_string()))?;
         Ok(())
     }
 }

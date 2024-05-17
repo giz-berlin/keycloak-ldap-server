@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{keycloak_service_account, proto, search};
+use crate::{entry, keycloak_service_account, server};
 use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
 use regex::Regex;
 
@@ -9,7 +9,6 @@ pub struct LdapError(pub LdapResultCode, pub String);
 
 #[derive(Debug)]
 pub struct LdapBindInfo {
-    // Used to help ID the user doing the action, makes logging nicer.
     pub client: String,
     // The keycloak service account associated with the credentials passed by the client.
     // Allows us to query the keycloak for user-data.
@@ -32,7 +31,7 @@ pub struct LdapHandler {
     keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
     num_users_to_fetch: i32,
     distinguished_name_regex: Regex,
-    ldap_entry_builder: search::LdapEntryBuilder
+    ldap_entry_builder: entry::LdapEntryBuilder,
 }
 
 impl LdapHandler {
@@ -40,7 +39,7 @@ impl LdapHandler {
         base_distinguished_name: String,
         num_users_to_fetch: i32,
         keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
-        ldap_entry_builder: search::LdapEntryBuilder
+        ldap_entry_builder: entry::LdapEntryBuilder,
     ) -> Self {
         let distinguished_name_regex = Regex::new(format!("^((?P<attr>[^=]+)=(?P<val>[^=]+),)?{base_distinguished_name}$").as_str())
             // We are responsible for passing a valid name as configuration parameter
@@ -50,13 +49,13 @@ impl LdapHandler {
             keycloak_service_account_builder,
             num_users_to_fetch,
             distinguished_name_regex,
-            ldap_entry_builder
+            ldap_entry_builder,
         }
     }
 
     /// Perform an LDAP operation, producing proper LDAP responses.
     /// Errors occurring during the execution will be converted to LDAP error states.
-    pub async fn perform_ldap_operation(&self, operation: ServerOps, session: &proto::LdapClientSession) -> LdapResponseState {
+    pub async fn perform_ldap_operation(&self, operation: ServerOps, session: &server::LdapClientSession) -> LdapResponseState {
         match operation {
             ServerOps::SimpleBind(sbr) => self
                 .do_bind(&session.id, &sbr.dn, &sbr.pw)
@@ -110,7 +109,7 @@ impl LdapHandler {
                 })
             }
             Err(e) => {
-                log::info!("Session {} || LDAP Bind failure, could not authenticate against keycloak, {:?}", session_id, e);
+                log::error!("Session {} || LDAP Bind failure, could not authenticate against keycloak, {:?}", session_id, e);
                 Err(LdapError(
                     LdapResultCode::InvalidCredentials,
                     "Could not authenticate against Keycloak".to_string(),
@@ -124,7 +123,10 @@ impl LdapHandler {
     async fn do_search(&self, session_id: &Uuid, sr: &SearchRequest, bound_user: &LdapBindInfo) -> Result<Vec<LdapMsg>, LdapError> {
         if sr.base.is_empty() && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found RootDSE", session_id);
-            Ok(vec![sr.gen_result_entry(self.ldap_entry_builder.rootdse().new_search_result(&sr.attrs)), sr.gen_success()])
+            Ok(vec![
+                sr.gen_result_entry(self.ldap_entry_builder.rootdse().new_search_result(&sr.attrs)),
+                sr.gen_success(),
+            ])
         } else if sr.base.eq("cn=subschema") && sr.scope == LdapSearchScope::Base {
             log::debug!("Session {} || Search: Found subschema definition", session_id);
             Ok(vec![
@@ -145,7 +147,7 @@ impl LdapHandler {
             };
 
             let mut results = Vec::new();
-            let mut add_search_result_on_filter_match = |filter: &LdapFilter, ldap_entry: &search::LdapEntry| -> Result<(), LdapError> {
+            let mut add_search_result_on_filter_match = |filter: &LdapFilter, ldap_entry: &entry::LdapEntry| -> Result<(), LdapError> {
                 if ldap_entry.matches_filter(filter)? {
                     results.push(sr.gen_result_entry(ldap_entry.new_search_result(&sr.attrs)))
                 }
@@ -153,7 +155,7 @@ impl LdapHandler {
                 Ok(())
             };
 
-            let users: Vec<search::LdapEntry> = match bound_user.keycloak_service_account.query_users(self.num_users_to_fetch).await {
+            let users: Vec<entry::LdapEntry> = match bound_user.keycloak_service_account.query_users(self.num_users_to_fetch).await {
                 Ok(users) => users,
                 Err(e) => {
                     log::error!("Could not fetch users from keycloak: {:?}", e);
