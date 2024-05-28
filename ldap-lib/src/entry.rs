@@ -34,15 +34,15 @@ impl LdapEntryBuilder {
     /// The root-DSE: Provides meta-information on what functionality our server offers.
     pub fn rootdse(&self) -> LdapEntry {
         let mut entry = LdapEntry::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
-        entry.attributes.insert("namingContexts", vec![self.base_distinguished_name.clone()]);
-        entry.attributes.insert("supportedLDAPVersion", vec!["3".to_string()]);
+        entry.set_attribute("namingContexts", vec![self.base_distinguished_name.clone()]);
+        entry.set_attribute("supportedLDAPVersion", vec!["3".to_string()]);
         // This is really just a dummy schema entry, see Self::subschema.
         // However, we still provide it, as some client implementations may error (or at least omit
         // a warning) if it is not present at all.
-        entry.attributes.insert("subschemaSubentry", vec!["cn=subschema".to_string()]);
-        entry.attributes.insert("vendorName", vec!["giz.berlin".to_string()]);
-        entry.attributes.insert("vendorVersion", vec!["LDAP Keycloak Bridge 1.0".to_string()]);
-        entry.attributes.insert("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]); // WhoAmI
+        entry.set_attribute("subschemaSubentry", vec!["cn=subschema".to_string()]);
+        entry.set_attribute("vendorName", vec!["giz.berlin".to_string()]);
+        entry.set_attribute("vendorVersion", vec!["LDAP Keycloak Bridge 1.0".to_string()]);
+        entry.set_attribute("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]); // WhoAmI
         entry
     }
 
@@ -66,7 +66,7 @@ impl LdapEntryBuilder {
     /// of our organization, meaning it will be a subordinate of this entry.
     pub fn organization(&self) -> LdapEntry {
         let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()], true);
-        entry.attributes.insert("organizationName", vec!["giz.berlin".to_string()]);
+        entry.set_attribute("organizationName", vec!["giz.berlin".to_string()]);
         entry
     }
 
@@ -92,7 +92,7 @@ impl LdapEntryBuilder {
 /// A data class representing an entry in our directory.
 pub struct LdapEntry {
     pub dn: String,
-    pub attributes: HashMap<&'static str, Vec<String>>,
+    attributes: HashMap<String, Vec<String>>,
     has_subordinates: bool,
 }
 
@@ -104,8 +104,24 @@ impl LdapEntry {
             has_subordinates,
         };
         class.push("top".to_string()); // Every entry belongs to this class
-        entry.attributes.insert("objectClass", class);
+        entry.set_attribute("objectClass", class);
         entry
+    }
+
+    /// Sets an attribute for this entry. As LDAP is case-insensitive regarding attribute names,
+    /// we will convert all attribute names to lower case.
+    pub fn set_attribute(&mut self, name: &str, value: Vec<String>) {
+        self.attributes.insert(name.to_lowercase(), value);
+    }
+
+    /// Gets the value of an attribute. As LDAP is case-insensitive, query for the lowercased version
+    /// of the requested attribute.
+    pub fn get_attribute(&self, name: &str) -> Option<&Vec<String>> {
+        self.attributes.get(name.to_lowercase().as_str())
+    }
+
+    fn get_key_value(&self, attribute_name: &str) -> Option<(&String, &Vec<String>)> {
+        self.attributes.get_key_value(attribute_name.to_lowercase().as_str())
     }
 
     /// The client appears to have searched for this entry. Convert this entry into the data
@@ -115,13 +131,13 @@ impl LdapEntry {
         let all_requested = requested_attributes.is_empty() ||
             // We don't have any operational attributes, so this is equivalent
             requested_attributes.iter().any(|attr| attr == "*" || attr == "+");
-        let target_attributes: Vec<(&&str, &Vec<String>)> = if all_requested {
+        let target_attributes: Vec<(&String, &Vec<String>)> = if all_requested {
             self.attributes.iter().collect()
         } else {
             requested_attributes
                 .iter()
                 .filter(|&attr| !attr.is_empty())
-                .filter_map(|attr| self.attributes.get_key_value(attr.as_str()))
+                .filter_map(|attr| self.get_key_value(attr))
                 .collect()
         };
 
@@ -138,7 +154,7 @@ impl LdapEntry {
 
         // We have this separately because this is not really an attribute of the entry,
         // but rather metainformation the client may explicitly query.
-        if requested_attributes.iter().any(|attr| attr == "hasSubordinates") {
+        if requested_attributes.iter().any(|attr| attr.to_lowercase() == "hassubordinates") {
             result.attributes.push(LdapPartialAttribute {
                 atype: "hasSubordinates".to_string(),
                 vals: vec![self.has_subordinates.to_string().into_bytes()],
@@ -188,16 +204,16 @@ impl LdapEntry {
                 Ok(!self._matches_filter(sub_filter, depth, elems)?)
             }
             LdapFilter::Equality(a, v) => {
-                if let Some(values) = self.attributes.get(a.as_str()) {
+                if let Some(values) = self.get_attribute(a) {
                     Ok(values.iter().any(|val| val == v))
                 } else {
                     // If the attribute does not even exist, we have no match.
                     Ok(false)
                 }
             }
-            LdapFilter::Present(a) => Ok(self.attributes.contains_key(a.as_str())),
+            LdapFilter::Present(a) => Ok(self.get_attribute(a).is_some()),
             LdapFilter::Substring(a, LdapSubstringFilter { initial, any, final_ }) => {
-                if let Some(values) = self.attributes.get(a.as_str()) {
+                if let Some(values) = self.get_attribute(a) {
                     // This might not be the most efficient way to do this, but it would have
                     // been much more tedious to implement it manually with substring searches.
                     let mut regex = "".to_string();

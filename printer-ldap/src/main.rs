@@ -9,10 +9,10 @@ pub struct PrinterUserAttributeExtractor;
 
 impl entry::KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
     fn extract(&self, user: UserRepresentation, ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
-        ldap_entry.attributes.insert("cn", vec![user.id.context("user id missing")?]);
-        ldap_entry.attributes.insert("displayName", vec![user.username.context("username missing")?]);
-        ldap_entry.attributes.insert("givenName", vec![user.first_name.unwrap_or("".to_string())]);
-        ldap_entry.attributes.insert(
+        ldap_entry.set_attribute("cn", vec![user.id.context("user id missing")?]);
+        ldap_entry.set_attribute("displayName", vec![user.username.context("username missing")?]);
+        ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
+        ldap_entry.set_attribute(
             "surname",
             vec![
                 // We would really like to have a name for the user so that the client can know who they
@@ -20,7 +20,7 @@ impl entry::KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
                 user.last_name.context("last name missing")?,
             ],
         );
-        ldap_entry.attributes.insert(
+        ldap_entry.set_attribute(
             "mail",
             vec![
                 // A user without a mail is not very useful in our case.
