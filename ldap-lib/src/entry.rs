@@ -83,6 +83,9 @@ impl LdapEntryBuilder {
             ],
             false,
         );
+        // No matter the extractor, the LDAP specification says that we need to have an
+        // attribute matching the identifier used in the dsn
+        entry.set_attribute("cn", vec![user.id.clone()?]);
         self.extractor.extract(user, &mut entry).ok()?;
 
         Some(entry)
@@ -250,5 +253,19 @@ impl LdapEntry {
             .checked_sub(consumption_amount)
             .ok_or(proto::LdapError(LdapResultCode::UnwillingToPerform, "Filter too expensive".to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use keycloak::types::UserRepresentation;
+    use crate::entry::{KeycloakUserAttributeExtractor, LdapEntry};
+
+    pub struct DummyExtractor;
+
+    impl KeycloakUserAttributeExtractor for DummyExtractor {
+        fn extract(&self, _user: UserRepresentation, _ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 }

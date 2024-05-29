@@ -72,9 +72,9 @@ impl LdapHandler {
                     .map(LdapResponseState::MultiPartRespond)
                     .unwrap_or_else(|e| {
                         log::error!("Session {}, msg {} || Error performing search request: {:?}", session.id, sr.msgid, e);
-                        LdapResponseState::Respond(sr.gen_error(e.0, e.1.to_string()))
+                        LdapResponseState::MultiPartRespond(vec![sr.gen_error(e.0, e.1.to_string())])
                     }),
-                None => LdapResponseState::Respond(sr.gen_error(LdapResultCode::OperationsError, "Must authenticate first!".to_string())),
+                None => LdapResponseState::MultiPartRespond(vec![sr.gen_error(LdapResultCode::OperationsError, "Must authenticate first!".to_string())]),
             },
             ServerOps::Unbind(_) => LdapResponseState::Unbind,
             ServerOps::Compare(cr) => LdapResponseState::Respond(cr.gen_error(LdapResultCode::Other, "Operation not supported".to_string())),
@@ -189,6 +189,302 @@ impl LdapHandler {
             log::debug!("Session {} || Search: Found {} ldap entries", session_id, results.len());
             results.push(sr.gen_success());
             Ok(results)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{entry, keycloak_service_account};
+    use keycloak::types::TypeVec;
+    use keycloak::KeycloakError;
+    use ldap3_proto::proto::LdapOp;
+    use rstest::*;
+    use std::sync::Mutex;
+
+    const DEFAULT_BASE_DISTINGUISHED_NAME: &str = "dc=base_dsn";
+    const DEFAULT_USERS_TO_FETCH: i32 = 5;
+
+    static SERVICE_ACCOUNT_CREATION_MUTEX: Mutex<()> = Mutex::new(());
+
+    // This requires a macro because we need the lock and mock ctx to stay alive in the test function
+    macro_rules! mock_service_account_client_query_users {
+        ($query_users_response:expr) => {
+            let _l = SERVICE_ACCOUNT_CREATION_MUTEX.lock();
+            let ctx = keycloak_service_account::ServiceAccountClient::new_context();
+            let mut client = keycloak_service_account::ServiceAccountClient::default();
+            client.expect_query_users().returning(move |_| $query_users_response);
+            ctx.expect().return_once(move |_, _| client);
+        };
+    }
+
+    #[fixture]
+    fn ldap_handler() -> LdapHandler {
+        LdapHandler::new(
+            DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
+            DEFAULT_USERS_TO_FETCH,
+            keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
+            entry::LdapEntryBuilder::new(DEFAULT_BASE_DISTINGUISHED_NAME.to_string(), Box::new(entry::tests::DummyExtractor {})),
+        )
+    }
+
+    mod when_bind {
+        use super::*;
+        use ldap3_proto::proto::LdapBindResponse;
+        use ldap3_proto::SimpleBindRequest;
+
+        fn bind_request(dn: &str, pw: &str) -> ServerOps {
+            ServerOps::SimpleBind(SimpleBindRequest {
+                msgid: 1,
+                dn: dn.to_string(),
+                pw: pw.to_string(),
+            })
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn with_correct_credentials__then_succeed(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+
+            // when
+            let bind_request = bind_request("test_client", "client_secret");
+            let client_session = server::LdapClientSession::new();
+
+            let bind_result = ldap_handler.perform_ldap_operation(bind_request, &client_session).await;
+
+            // then
+            assert!(matches!(bind_result, LdapResponseState::Bind(_, _)))
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn with_invalid_credentials__then_fail(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Err(KeycloakError::HttpFailure {
+                status: 401,
+                body: None,
+                text: String::new()
+            }));
+
+            // when
+            let bind_request = bind_request("test_client", "client_secret");
+            let client_session = server::LdapClientSession::new();
+
+            let bind_result = ldap_handler.perform_ldap_operation(bind_request, &client_session).await;
+
+            // then
+            if let LdapResponseState::Respond(msg) = bind_result {
+                if let LdapOp::BindResponse(LdapBindResponse { res, saslcreds: _ }) = msg.op {
+                    assert_eq!(res.code, LdapResultCode::InvalidCredentials);
+                }
+            } else {
+                panic!("Unexpected operation result")
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn anonymously__then_reject_request(ldap_handler: LdapHandler) {
+            // when
+            let bind_request = bind_request("", "");
+            let client_session = server::LdapClientSession::new();
+
+            let bind_result = ldap_handler.perform_ldap_operation(bind_request, &client_session).await;
+
+            // then
+            if let LdapResponseState::Respond(msg) = bind_result {
+                if let LdapOp::BindResponse(LdapBindResponse { res, saslcreds: _ }) = msg.op {
+                    assert_eq!(res.code, LdapResultCode::UnwillingToPerform);
+                }
+            } else {
+                panic!("Unexpected operation result")
+            }
+        }
+    }
+
+    mod when_search {
+        use super::*;
+        use keycloak::types::{TypeString, UserRepresentation};
+        use ldap3_proto::proto::LdapResult;
+
+        const DEFAULT_USER_ID: &str = "s0m3-us3r";
+        fn default_user_dsn() -> String {
+            "cn=".to_string() + DEFAULT_USER_ID + "," + DEFAULT_BASE_DISTINGUISHED_NAME
+        }
+
+        fn search_request(base: &str, scope: LdapSearchScope, filter: Option<LdapFilter>) -> ServerOps {
+            ServerOps::Search(SearchRequest {
+                msgid: 0,
+                base: base.to_string(),
+                scope,
+                filter: filter.unwrap_or(LdapFilter::Present("objectclass".to_string())),
+                attrs: vec!["objectclass".to_string()],
+            })
+        }
+
+        async fn client_session(bound: bool, ldap_handler: &LdapHandler) -> server::LdapClientSession {
+            let mut client_session = server::LdapClientSession::new();
+            if bound {
+                client_session.bind_info = Some(LdapBindInfo {
+                    client: "default_client".to_string(),
+                    keycloak_service_account: ldap_handler.keycloak_service_account_builder.new_service_account("", "").await.unwrap(),
+                })
+            }
+            client_session
+        }
+
+        macro_rules! assert_search_result {
+            ($search_result:expr, $result_code:expr $(, $dn:expr)*) => {
+                #[allow(unused_mut)] let mut previous_results = 0;
+                if let LdapResponseState::MultiPartRespond(msg) = $search_result {
+                    $(
+                        if let LdapOp::SearchResultEntry(entry) = &msg.get(previous_results).unwrap().op {
+                            assert_eq!(entry.dn, $dn);
+                        } else {
+                            panic!("Expected to find a search result")
+                        }
+                        previous_results += 1;
+                    )*
+                    assert_eq!(msg.len(), previous_results + 1);
+                    if let LdapOp::SearchResultDone(LdapResult{ code, matcheddn: _, message: _, referral: _}) = &msg.get(previous_results).unwrap().op {
+                        assert_eq!(code, &$result_code)
+                    } else {
+                        panic!("Expected search result done message")
+                    }
+                } else {
+                    panic!("Unexpected operation result")
+                }
+            };
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn unbound__then_reject_request(ldap_handler: LdapHandler) {
+            // when
+            let search_request = search_request("", LdapSearchScope::Base, None);
+            let client_session = client_session(false, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::OperationsError);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn root_dse__then_return_result(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+
+            // when
+            let search_request = search_request("", LdapSearchScope::Base, None);
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::Success, "");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn subschema__then_return_result(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+
+            // when
+            let search_request = search_request("cn=subschema", LdapSearchScope::Base, None);
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::Success, "cn=subschema");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn organization_subtree__then_return_result(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(vec![UserRepresentation {
+                id: Some(TypeString::from(DEFAULT_USER_ID)),
+                ..Default::default()
+            }]));
+
+            // when
+            let search_request = search_request(DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Subtree, None);
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::Success, DEFAULT_BASE_DISTINGUISHED_NAME, default_user_dsn());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn organization_subtree_with_filter__then_only_return_matching_results(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(vec![
+                UserRepresentation {
+                    id: Some(TypeString::from(DEFAULT_USER_ID)),
+                    ..Default::default()
+                },
+                UserRepresentation {
+                    id: Some(TypeString::from("other-user-id")),
+                    ..Default::default()
+                }
+            ]));
+
+            // when
+            let search_request = search_request(
+                DEFAULT_BASE_DISTINGUISHED_NAME,
+                LdapSearchScope::Subtree,
+                Some(LdapFilter::Equality("cn".to_string(), DEFAULT_USER_ID.to_string())),
+            );
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::Success, default_user_dsn());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn specifically_for_entry__then_return_result(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(vec![UserRepresentation {
+                id: Some(TypeString::from(DEFAULT_USER_ID)),
+                ..Default::default()
+            }]));
+
+            // when
+            let search_request = search_request(default_user_dsn().as_str(), LdapSearchScope::Base, None);
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::Success, default_user_dsn());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn non_existing_entry__then_return_search_failure(ldap_handler: LdapHandler) {
+            // given
+            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+
+            // when
+            let search_request = search_request("bad-dsn", LdapSearchScope::Base, None);
+            let client_session = client_session(true, &ldap_handler).await;
+
+            let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+            // then
+            assert_search_result!(search_result, LdapResultCode::NoSuchObject);
         }
     }
 }

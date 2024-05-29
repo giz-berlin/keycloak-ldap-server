@@ -135,8 +135,6 @@ async fn _client_session(
     tls_acceptor: SslAcceptor,
     client_address: net::SocketAddr,
 ) -> anyhow::Result<()> {
-    // Start the event
-    // From the parameters we need to create an SslContext.
     let mut tlsstream = Ssl::new(tls_acceptor.context())
         .and_then(|tls_obj| SslStream::new(tls_obj, tcpstream))
         .context("Cannot setup SSL stream")?;

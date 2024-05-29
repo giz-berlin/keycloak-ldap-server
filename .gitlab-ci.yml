@@ -27,3 +27,9 @@ lint:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
   needs: []
+
+test:
+  stage: test
+  script:
+    - cargo test
+  needs: []
