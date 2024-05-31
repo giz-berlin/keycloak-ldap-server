@@ -202,10 +202,7 @@ impl LdapEntry {
 
                 Ok(false)
             }
-            LdapFilter::Not(sub_filter) => {
-                self.consume_resource(elems, 1)?;
-                Ok(!self._matches_filter(sub_filter, depth, elems)?)
-            }
+            LdapFilter::Not(sub_filter) => Ok(!self._matches_filter(sub_filter, new_depth, elems)?),
             LdapFilter::Equality(a, v) => {
                 if let Some(values) = self.get_attribute(a) {
                     Ok(values.iter().any(|val| val == v))
@@ -258,8 +255,156 @@ impl LdapEntry {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use keycloak::types::UserRepresentation;
-    use crate::entry::{KeycloakUserAttributeExtractor, LdapEntry};
+    use rstest::*;
+
+    mod when_filtering {
+        use super::*;
+        use ldap3_proto::proto::LdapMatchingRuleAssertion;
+        use ldap3_proto::LdapFilter;
+
+        #[fixture]
+        fn dummy_entry() -> LdapEntry {
+            LdapEntry::new("".to_string(), Vec::new(), false)
+        }
+
+        fn matching_filter() -> LdapFilter {
+            LdapFilter::Present("objectclass".to_string())
+        }
+
+        fn non_matching_filter() -> LdapFilter {
+            LdapFilter::Not(Box::new(matching_filter()))
+        }
+
+        #[rstest]
+        fn then_and_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::And(vec![matching_filter(), matching_filter(), matching_filter()]))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::And(vec![matching_filter(), non_matching_filter(), matching_filter()]))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_or_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), non_matching_filter()]))
+                .unwrap());
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), matching_filter()]))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_not_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::Not(Box::new(non_matching_filter()))).unwrap());
+            assert!(!dummy_entry.matches_filter(&LdapFilter::Not(Box::new(matching_filter()))).unwrap());
+        }
+
+        #[rstest]
+        #[case("*", true)]
+        #[case("very*", true)]
+        #[case("*long*", true)]
+        #[case("long*", false)]
+        #[case("*long", false)]
+        #[case("v*long*l*e", true)]
+        fn then_substring_filter_works_correctly(mut dummy_entry: LdapEntry, #[case] filter_string: String, #[case] should_match: bool) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["very_long_value".to_string()]);
+
+            // when & then
+            assert_eq!(
+                should_match,
+                dummy_entry
+                    .matches_filter(&LdapFilter::Substring("attr".to_string(), LdapSubstringFilter::from(filter_string)))
+                    .unwrap()
+            )
+        }
+
+        #[rstest]
+        fn then_present_filter_works_correctly(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["value".to_string()]);
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::Present("attr".to_string())).unwrap());
+            assert!(!dummy_entry.matches_filter(&LdapFilter::Present("other_attr".to_string())).unwrap());
+        }
+
+        #[rstest]
+        fn then_equality_filter_works_correctly(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["value".to_string()]);
+
+            // when & then
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::Equality("attr".to_string(), "value".to_string()))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Equality("attr".to_string(), "other_value".to_string()))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Equality("other_attr".to_string(), "value".to_string()))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_match_case_insensitive(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attribute", vec!["value".to_string()]);
+
+            let filter = LdapFilter::Present("AttRIbUTe".to_string());
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).unwrap())
+        }
+
+        #[rstest]
+        #[case::le(LdapFilter::LessOrEqual("".to_string(), "".to_string()))]
+        #[case::ge(LdapFilter::GreaterOrEqual("".to_string(), "".to_string()))]
+        #[case::approx(LdapFilter::Approx("".to_string(), "".to_string()))]
+        #[case::extensible(LdapFilter::Extensible(LdapMatchingRuleAssertion{..Default::default()}))]
+        fn then_reject_unsupported_filter(dummy_entry: LdapEntry, #[case] filter: LdapFilter) {
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).is_err())
+        }
+
+        #[rstest]
+        fn then_forbid_too_many_filter_elements(dummy_entry: LdapEntry) {
+            // given
+            let mut sub_filters = Vec::new();
+            for _ in 0..FILTER_MAX_ELEMENTS + 1 {
+                sub_filters.push(matching_filter());
+            }
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::And(sub_filters.clone())).is_err());
+            assert!(dummy_entry.matches_filter(&LdapFilter::Or(sub_filters)).is_err());
+        }
+
+        #[rstest]
+        #[case::not(|f| LdapFilter::Not(Box::new(f)))]
+        #[case::and(|f| LdapFilter::And(vec![f]))]
+        #[case::or(|f| LdapFilter::Or(vec![f]))]
+        fn then_forbid_too_deep_nesting<F>(dummy_entry: LdapEntry, #[case] mk_filter: F)
+        where
+            F: Fn(LdapFilter) -> LdapFilter,
+        {
+            // given
+            let mut filter = matching_filter();
+            for _ in 0..FILTER_MAX_DEPTH + 1 {
+                filter = mk_filter(filter);
+            }
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).is_err())
+        }
+    }
 
     pub struct DummyExtractor;
 
