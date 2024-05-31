@@ -137,7 +137,6 @@ impl LdapHandler {
             let opt_value = match self.distinguished_name_regex.captures(sr.base.as_str()) {
                 Some(caps) => caps.name("val").map(|v| v.as_str().to_string()),
                 None => {
-                    // TODO: return nearest ancestor?
                     log::debug!("Session {} || Search: Non-existing search base DN '{}'", session_id, sr.base);
                     return Err(LdapError(
                         LdapResultCode::NoSuchObject,

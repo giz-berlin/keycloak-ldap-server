@@ -12,9 +12,7 @@ impl ServiceAccountClientBuilder {
     /// Construct a new client using provided service account credentials.
     /// Will verify that the credentials authenticate successfully.
     pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> anyhow::Result<ServiceAccountClient> {
-        // TODO: this does not appear to do proper token refresh, but appears to fetch a new token for each API request
-        // They appear to be aware of this issue: https://github.com/kilork/keycloak/issues/32
-        // Also, the token we receive is not validated, apparently, but that might be fine in our case.
+        // Note that the token we receive is not validated, but that might be fine in our case.
         // Also, since the acquire method is not public, we need to do some API request to validate we actually have a working client...
         let keycloak_client =
             keycloak::KeycloakServiceAccountAdminTokenRetriever::create_with_custom_realm(client_id, client_secret, &self.realm, reqwest::Client::new());
