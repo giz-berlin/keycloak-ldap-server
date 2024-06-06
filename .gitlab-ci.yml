@@ -4,10 +4,6 @@ stages:
   - build
   - test
 
-variables:
-  # This will instruct Docker not to start over TLS.
-  DOCKER_TLS_CERTDIR: ""
-
 build:
   stage: build
   script:

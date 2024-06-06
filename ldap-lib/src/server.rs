@@ -28,6 +28,9 @@ struct CliArguments {
     #[clap(long, default_value = "dc=giz,dc=berlin", help = "The base point of our LDAP tree")]
     base_distinguished_name: String,
 
+    #[clap(long, default_value = "giz.berlin", help = "The name of the organization as shown by the LDAP base entry")]
+    organization_name: String,
+
     #[clap(long, default_value = "ldap_keycloak_bridge.crt.pem", help = "The TLS certificate used by the LDAP server")]
     certificate: String,
 
@@ -97,7 +100,7 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
         args.base_distinguished_name.clone(),
         args.num_users,
         keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
-        entry::LdapEntryBuilder::new(args.base_distinguished_name, user_attribute_extractor),
+        entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
     ));
 
     loop {

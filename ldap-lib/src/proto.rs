@@ -224,7 +224,11 @@ mod tests {
             DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             DEFAULT_USERS_TO_FETCH,
             keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
-            entry::LdapEntryBuilder::new(DEFAULT_BASE_DISTINGUISHED_NAME.to_string(), Box::new(entry::tests::DummyExtractor {})),
+            entry::LdapEntryBuilder::new(
+                DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
+                "".to_string(),
+                Box::new(entry::tests::DummyExtractor {}),
+            ),
         )
     }
 

@@ -18,13 +18,15 @@ pub trait KeycloakUserAttributeExtractor: Send + Sync {
 
 pub(crate) struct LdapEntryBuilder {
     base_distinguished_name: String,
+    organization_name: String,
     extractor: Box<dyn KeycloakUserAttributeExtractor>,
 }
 
 impl LdapEntryBuilder {
-    pub fn new(base_distinguished_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
+    pub fn new(base_distinguished_name: String, organization_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
         Self {
             base_distinguished_name,
+            organization_name,
             extractor,
         }
     }
@@ -39,13 +41,15 @@ impl LdapEntryBuilder {
         // a warning) if it is not present at all.
         entry.set_attribute("subschemaSubentry", vec!["cn=subschema".to_string()]);
         entry.set_attribute("vendorName", vec!["giz.berlin".to_string()]);
-        entry.set_attribute("vendorVersion", vec!["LDAP Keycloak Bridge 1.0".to_string()]);
-        entry.set_attribute("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]); // WhoAmI
+        entry.set_attribute("vendorVersion", vec!["LDAP Keycloak Bridge ".to_string() + env!("CARGO_PKG_VERSION")]);
+        // WhoAmI: https://datatracker.ietf.org/doc/html/rfc4532.html#section-2
+        entry.set_attribute("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]);
         entry
     }
 
     /// The (dummy) schema specification that our server adheres to.
-    /// RFC 4512 says that this SHALL be specified by servers that permit modifications and is only
+    /// [RFC 4512, section 4.2](https://datatracker.ietf.org/doc/html/rfc4512.html#section-4.2)
+    /// says that this SHALL be specified by servers that permit modifications and is only
     /// RECOMMENDED for servers that do not.
     /// If we wanted to be fully standard-conform, we would need to list all object classes and
     /// attributes we support here, following the required syntax.
@@ -64,7 +68,7 @@ impl LdapEntryBuilder {
     /// of our organization, meaning it will be a subordinate of this entry.
     pub fn organization(&self) -> LdapEntry {
         let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()], true);
-        entry.set_attribute("organizationName", vec!["giz.berlin".to_string()]);
+        entry.set_attribute("organizationName", vec![self.organization_name.clone()]);
         entry
     }
 
