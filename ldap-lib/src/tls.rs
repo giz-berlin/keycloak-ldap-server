@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Context};
-use openssl::pkey::{PKeyRef, Private};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use openssl::{
+    pkey::{PKeyRef, Private},
+    ssl::{SslAcceptor, SslFiletype, SslMethod},
+};
 
 const RSA_MIN_KEY_SIZE_BITS: u32 = 2048;
 const EC_MIN_KEY_SIZE_BITS: i32 = 224;

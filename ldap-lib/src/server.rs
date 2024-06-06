@@ -1,21 +1,17 @@
+use std::{
+    fmt::{Debug, Display, Formatter},
+    net,
+    pin::Pin,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
+
 use anyhow::Context;
 use clap::Parser;
-use std::fmt::{Debug, Display, Formatter};
-use std::net;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-
-use futures_util::sink::SinkExt;
-use futures_util::stream::StreamExt;
-use ldap3_proto::{DisconnectionNotice, LdapCodec, LdapResultCode, ServerOps};
+use futures_util::{SinkExt, StreamExt};
+use ldap3_proto::{LdapCodec, LdapResultCode};
 use openssl::ssl::{Ssl, SslAcceptor};
-
-use tokio::net::{TcpListener, TcpStream};
-use tokio_openssl::SslStream;
-use tokio_util::codec::{FramedRead, FramedWrite};
-
 use uuid::Uuid;
 
 use crate::{entry, keycloak_service_account, proto, server, tls};
@@ -96,7 +92,7 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
     log::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
-    let listener = TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
+    let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
     let handler = Arc::from(proto::LdapHandler::new(
         args.base_distinguished_name.clone(),
         args.num_users,
@@ -118,7 +114,7 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
 /// Initiate an LDAP session. Will capture any errors that occur while handling the session and
 /// convert them into log messages.
-async fn client_session(ldap: Arc<proto::LdapHandler>, tcpstream: TcpStream, tls_acceptor: SslAcceptor, client_address: net::SocketAddr) {
+async fn client_session(ldap: Arc<proto::LdapHandler>, tcpstream: tokio::net::TcpStream, tls_acceptor: SslAcceptor, client_address: net::SocketAddr) {
     let mut session = LdapClientSession::new();
     log::info!("Starting new client session {}", session);
     if let Err(e) = _client_session(&mut session, ldap, tcpstream, tls_acceptor, client_address).await {
@@ -131,18 +127,20 @@ async fn client_session(ldap: Arc<proto::LdapHandler>, tcpstream: TcpStream, tls
 async fn _client_session(
     session: &mut LdapClientSession,
     ldap: Arc<proto::LdapHandler>,
-    tcpstream: TcpStream,
+    tcpstream: tokio::net::TcpStream,
     tls_acceptor: SslAcceptor,
     client_address: net::SocketAddr,
 ) -> anyhow::Result<()> {
     let mut tlsstream = Ssl::new(tls_acceptor.context())
-        .and_then(|tls_obj| SslStream::new(tls_obj, tcpstream))
+        .and_then(|tls_obj| tokio_openssl::SslStream::new(tls_obj, tcpstream))
         .context("Cannot setup SSL stream")?;
-    SslStream::accept(Pin::new(&mut tlsstream)).await.context("Cannot accept SSL stream")?;
+    tokio_openssl::SslStream::accept(Pin::new(&mut tlsstream))
+        .await
+        .context("Cannot accept SSL stream")?;
 
     let (r, w) = tokio::io::split(tlsstream);
-    let mut ldap_reader = FramedRead::new(r, LdapCodec::default());
-    let mut ldap_writer = FramedWrite::new(w, LdapCodec::default());
+    let mut ldap_reader = tokio_util::codec::FramedRead::new(r, LdapCodec::default());
+    let mut ldap_writer = tokio_util::codec::FramedWrite::new(w, LdapCodec::default());
 
     // For some reason, some client implementations (namely Apache Directory Studio) appear to just
     // miss our first response if we are too fast :( It will then time out telling us we did not answer.
@@ -161,12 +159,12 @@ async fn _client_session(
             protomsg
         );
         let msg_id = protomsg.msgid;
-        let operation_result = match ServerOps::try_from(protomsg) {
+        let operation_result = match ldap3_proto::ServerOps::try_from(protomsg) {
             Ok(server_op) => {
                 log::debug!("Session {}, msg {} || Performing operation {:?}", session, msg_id, server_op);
                 ldap.perform_ldap_operation(server_op, session).await
             }
-            Err(_) => proto::LdapResponseState::Disconnect(DisconnectionNotice::gen(
+            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen(
                 LdapResultCode::ProtocolError,
                 format!("Invalid Request in session {}: msg {}", session.id, msg_id).as_str(),
             )),

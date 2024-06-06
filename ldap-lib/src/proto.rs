@@ -1,8 +1,8 @@
+use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
+use regex::Regex;
 use uuid::Uuid;
 
 use crate::{entry, keycloak_service_account, server};
-use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
-use regex::Regex;
 
 #[derive(Debug)]
 pub struct LdapError(pub LdapResultCode, pub String);
@@ -194,13 +194,13 @@ impl LdapHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{entry, keycloak_service_account};
-    use keycloak::types::TypeVec;
-    use keycloak::KeycloakError;
+    use std::sync::Mutex;
+
     use ldap3_proto::proto::LdapOp;
     use rstest::*;
-    use std::sync::Mutex;
+
+    use super::*;
+    use crate::{entry, keycloak_service_account};
 
     const DEFAULT_BASE_DISTINGUISHED_NAME: &str = "dc=base_dsn";
     const DEFAULT_USERS_TO_FETCH: i32 = 5;
@@ -229,9 +229,9 @@ mod tests {
     }
 
     mod when_bind {
+        use ldap3_proto::{proto::LdapBindResponse, SimpleBindRequest};
+
         use super::*;
-        use ldap3_proto::proto::LdapBindResponse;
-        use ldap3_proto::SimpleBindRequest;
 
         fn bind_request(dn: &str, pw: &str) -> ServerOps {
             ServerOps::SimpleBind(SimpleBindRequest {
@@ -245,7 +245,7 @@ mod tests {
         #[tokio::test]
         async fn with_correct_credentials__then_succeed(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+            mock_service_account_client_query_users!(Ok(Vec::new()));
 
             // when
             let bind_request = bind_request("test_client", "client_secret");
@@ -261,7 +261,7 @@ mod tests {
         #[tokio::test]
         async fn with_invalid_credentials__then_fail(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Err(KeycloakError::HttpFailure {
+            mock_service_account_client_query_users!(Err(keycloak::KeycloakError::HttpFailure {
                 status: 401,
                 body: None,
                 text: String::new()
@@ -304,9 +304,9 @@ mod tests {
     }
 
     mod when_search {
-        use super::*;
-        use keycloak::types::{TypeString, UserRepresentation};
         use ldap3_proto::proto::LdapResult;
+
+        use super::*;
 
         const DEFAULT_USER_ID: &str = "s0m3-us3r";
         fn default_user_dsn() -> String {
@@ -375,7 +375,7 @@ mod tests {
         #[tokio::test]
         async fn root_dse__then_return_result(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+            mock_service_account_client_query_users!(Ok(Vec::new()));
 
             // when
             let search_request = search_request("", LdapSearchScope::Base, None);
@@ -391,7 +391,7 @@ mod tests {
         #[tokio::test]
         async fn subschema__then_return_result(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+            mock_service_account_client_query_users!(Ok(Vec::new()));
 
             // when
             let search_request = search_request("cn=subschema", LdapSearchScope::Base, None);
@@ -407,8 +407,8 @@ mod tests {
         #[tokio::test]
         async fn organization_subtree__then_return_result(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(vec![UserRepresentation {
-                id: Some(TypeString::from(DEFAULT_USER_ID)),
+            mock_service_account_client_query_users!(Ok(vec![keycloak::types::UserRepresentation {
+                id: Some(DEFAULT_USER_ID.to_string()),
                 ..Default::default()
             }]));
 
@@ -427,12 +427,12 @@ mod tests {
         async fn organization_subtree_with_filter__then_only_return_matching_results(ldap_handler: LdapHandler) {
             // given
             mock_service_account_client_query_users!(Ok(vec![
-                UserRepresentation {
-                    id: Some(TypeString::from(DEFAULT_USER_ID)),
+                keycloak::types::UserRepresentation {
+                    id: Some(DEFAULT_USER_ID.to_string()),
                     ..Default::default()
                 },
-                UserRepresentation {
-                    id: Some(TypeString::from("other-user-id")),
+                keycloak::types::UserRepresentation {
+                    id: Some("other-user-id".to_string()),
                     ..Default::default()
                 }
             ]));
@@ -455,8 +455,8 @@ mod tests {
         #[tokio::test]
         async fn specifically_for_entry__then_return_result(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(vec![UserRepresentation {
-                id: Some(TypeString::from(DEFAULT_USER_ID)),
+            mock_service_account_client_query_users!(Ok(vec![keycloak::types::UserRepresentation {
+                id: Some(DEFAULT_USER_ID.to_string()),
                 ..Default::default()
             }]));
 
@@ -474,7 +474,7 @@ mod tests {
         #[tokio::test]
         async fn non_existing_entry__then_return_search_failure(ldap_handler: LdapHandler) {
             // given
-            mock_service_account_client_query_users!(Ok(TypeVec::new()));
+            mock_service_account_client_query_users!(Ok(Vec::new()));
 
             // when
             let search_request = search_request("bad-dsn", LdapSearchScope::Base, None);

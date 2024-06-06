@@ -32,8 +32,6 @@ impl ServiceAccountClientBuilder {
 #[mockall_double::double]
 pub use client::ServiceAccountClient;
 mod client {
-    use keycloak::types::TypeVec;
-    use keycloak::KeycloakError;
     use std::fmt::Formatter;
 
     /// A keycloak service account client that has been verified to authenticate successfully.
@@ -51,7 +49,7 @@ mod client {
 
         /// Query users of realm we configured for this client. Will not perform any pagination,
         /// so make sure the size_limit you pass is high enough to allow for all users to be returned.
-        pub async fn query_users(&self, size_limit: i32) -> Result<TypeVec<keycloak::types::UserRepresentation>, KeycloakError> {
+        pub async fn query_users(&self, size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, keycloak::KeycloakError> {
             self.client
                 .realm_users_get(
                     &self.target_realm,

@@ -1,11 +1,9 @@
-use keycloak::types::UserRepresentation;
-use ldap3_proto::{LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
-use std::collections::HashMap;
-use std::string::ToString;
+use std::{collections::HashMap, string::ToString};
+
+use ldap3_proto::{proto::LdapSubstringFilter, LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
+use regex::Regex;
 
 use crate::proto;
-use ldap3_proto::proto::LdapSubstringFilter;
-use regex::Regex;
 
 const FILTER_MAX_DEPTH: usize = 5;
 const FILTER_MAX_ELEMENTS: usize = 10;
@@ -15,7 +13,7 @@ const FILTER_MAX_ELEMENTS: usize = 10;
 // Trait bound in order to pass impls to async functions
 pub trait KeycloakUserAttributeExtractor: Send + Sync {
     /// Add the desired user attributes to the keycloak entry.
-    fn extract(&self, user: UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
+    fn extract(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
 }
 
 pub(crate) struct LdapEntryBuilder {
@@ -71,7 +69,7 @@ impl LdapEntryBuilder {
     }
 
     /// Convert a keycloak user to its corresponding LDAP representation.
-    pub fn build_from_keycloak_user(&self, user: UserRepresentation) -> Option<LdapEntry> {
+    pub fn build_from_keycloak_user(&self, user: keycloak::types::UserRepresentation) -> Option<LdapEntry> {
         let user_id = user.id.clone()?;
         let dn = "cn=".to_owned() + &user_id + "," + &self.base_distinguished_name;
         let mut entry = LdapEntry::new(
@@ -255,14 +253,15 @@ impl LdapEntry {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
     use keycloak::types::UserRepresentation;
     use rstest::*;
 
+    use super::*;
+
     mod when_filtering {
+        use ldap3_proto::{proto::LdapMatchingRuleAssertion, LdapFilter};
+
         use super::*;
-        use ldap3_proto::proto::LdapMatchingRuleAssertion;
-        use ldap3_proto::LdapFilter;
 
         #[fixture]
         fn dummy_entry() -> LdapEntry {
