@@ -4,8 +4,8 @@ use openssl::{
     ssl::{SslAcceptor, SslFiletype, SslMethod},
 };
 
-const RSA_MIN_KEY_SIZE_BITS: u32 = 2048;
-const EC_MIN_KEY_SIZE_BITS: i32 = 224;
+const RSA_MIN_KEY_SIZE_BITS: u32 = 4096;
+const EC_MIN_KEY_SIZE_BITS: i32 = 256;
 
 /// From the server configuration, generate an OpenSSL acceptor that we can use
 /// to build our sockets for HTTPS/LDAPS.
