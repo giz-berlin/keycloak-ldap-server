@@ -47,7 +47,7 @@ struct CliArguments {
     #[clap(long, default_value = "giz_oidc", help = "The keycloak realm to fetch users from")]
     keycloak_realm: String,
 
-    #[clap(short, long, default_value = "1000", help = "Number of users to fetch from keycloak")]
+    #[clap(short, long, default_value = "-1", help = "Number of users to fetch from keycloak")]
     num_users: i32,
 
     #[clap(flatten)]
