@@ -87,7 +87,9 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
     let args = server::CliArguments::parse();
 
     simple_logger::SimpleLogger::new()
-        .with_level(args.log_level.log_level().unwrap().to_level_filter())
+        .with_level(log::LevelFilter::Warn)
+        .with_module_level("giz_ldap_lib", args.log_level.log_level().unwrap().to_level_filter())
+        .env()
         .with_utc_timestamps()
         .init()?;
 
