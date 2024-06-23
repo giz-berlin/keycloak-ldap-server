@@ -1,4 +1,4 @@
-use ldap3_proto::{LdapFilter, LdapMsg, LdapResultCode, LdapSearchScope, SearchRequest, ServerOps};
+use ldap3_proto::{LdapMsg, LdapResultCode, SearchRequest, ServerOps};
 use regex::Regex;
 use uuid::Uuid;
 
@@ -41,7 +41,7 @@ impl LdapHandler {
         keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
         ldap_entry_builder: entry::LdapEntryBuilder,
     ) -> Self {
-        let distinguished_name_regex = Regex::new(format!("^((?P<attr>[^=]+)=(?P<val>[^=]+),)?{base_distinguished_name}$").as_str())
+        let distinguished_name_regex = Regex::new(format!("^(([^=]+)=([^=]+),)?{base_distinguished_name}$").as_str())
             // We are responsible for passing a valid name as configuration parameter
             .unwrap();
 
@@ -118,77 +118,45 @@ impl LdapHandler {
         }
     }
 
-    /// Perform an LDAP search. As our LDAP tree is rather shallow, we hard-code the search logic
-    /// to match exactly the few LDAP entries we can deal with.
+    /// Perform an LDAP search. The actual logic determining which LDAP entries match the search
+    /// request is implemented directly on the tree formed by the entries.
     async fn do_search(&self, session_id: &Uuid, sr: &SearchRequest, bound_user: &LdapBindInfo) -> Result<Vec<LdapMsg>, LdapError> {
-        if sr.base.is_empty() && sr.scope == LdapSearchScope::Base {
-            log::debug!("Session {} || Search: Found RootDSE", session_id);
-            Ok(vec![
-                sr.gen_result_entry(self.ldap_entry_builder.rootdse().new_search_result(&sr.attrs)),
-                sr.gen_success(),
-            ])
-        } else if sr.base.eq("cn=subschema") && sr.scope == LdapSearchScope::Base {
-            log::debug!("Session {} || Search: Found subschema definition", session_id);
-            Ok(vec![
-                sr.gen_result_entry(self.ldap_entry_builder.subschema().new_search_result(&sr.attrs)),
-                sr.gen_success(),
-            ])
-        } else {
-            let opt_value = match self.distinguished_name_regex.captures(sr.base.as_str()) {
-                Some(caps) => caps.name("val").map(|v| v.as_str().to_string()),
-                None => {
-                    log::debug!("Session {} || Search: Non-existing search base DN '{}'", session_id, sr.base);
-                    return Err(LdapError(
-                        LdapResultCode::NoSuchObject,
-                        "LDAP Search failure - invalid basedn or too deep nesting".to_string(),
-                    ));
-                }
-            };
+        let mut root = self.ldap_entry_builder.rootdse();
+        root.add_subordinate(self.ldap_entry_builder.subschema());
 
-            let mut results = Vec::new();
-            let mut add_search_result_on_filter_match = |filter: &LdapFilter, ldap_entry: &entry::LdapEntry| -> Result<(), LdapError> {
-                if ldap_entry.matches_filter(filter)? {
-                    results.push(sr.gen_result_entry(ldap_entry.new_search_result(&sr.attrs)))
-                }
-
-                Ok(())
-            };
-
-            let users: Vec<entry::LdapEntry> = match bound_user.keycloak_service_account.query_users(self.num_users_to_fetch).await {
-                Ok(users) => users,
-                Err(e) => {
-                    log::error!("Could not fetch users from keycloak: {:?}", e);
-                    return Err(LdapError(LdapResultCode::Other, "Could not load user information from keycloak".to_string()));
-                }
-            }
-            .into_iter()
-            .filter_map(|user| self.ldap_entry_builder.build_from_keycloak_user(user))
-            .collect();
-
-            match opt_value {
-                None => {
-                    if sr.scope == LdapSearchScope::Base || sr.scope == LdapSearchScope::Subtree {
-                        add_search_result_on_filter_match(&sr.filter, &self.ldap_entry_builder.organization())?
-                    }
-                    if sr.scope != LdapSearchScope::Base {
-                        for user in users {
-                            add_search_result_on_filter_match(&sr.filter, &user)?;
-                        }
-                    }
-                }
-                Some(value) => {
-                    if sr.scope == LdapSearchScope::Base || sr.scope == LdapSearchScope::Subtree {
-                        let filter = LdapFilter::And(vec![sr.filter.clone(), LdapFilter::Equality("cn".to_string(), value)]);
-                        for user in users {
-                            add_search_result_on_filter_match(&filter, &user)?;
-                        }
-                    }
-                }
-            }
-            log::debug!("Session {} || Search: Found {} ldap entries", session_id, results.len());
-            results.push(sr.gen_success());
-            Ok(results)
+        let mut organization = self.ldap_entry_builder.organization();
+        if self.distinguished_name_regex.captures(sr.base.as_str()).is_some() {
+            self.query_keycloak(&mut organization, bound_user).await?;
         }
+        root.add_subordinate(organization);
+
+        let search_results = root.find(sr)?;
+        log::debug!("Session {} || Search: Found {} ldap entries", session_id, search_results.len());
+        let mut result_messages: Vec<LdapMsg> = search_results.into_iter().map(|r| sr.gen_result_entry(r)).collect();
+        result_messages.push(sr.gen_success());
+        Ok(result_messages)
+    }
+
+    async fn query_keycloak(&self, organization: &mut entry::LdapEntry, bound_user: &LdapBindInfo) -> Result<(), LdapError> {
+        let users: std::collections::HashMap<String, entry::LdapEntry> = bound_user
+            .keycloak_service_account
+            .query_users(self.num_users_to_fetch)
+            .await?
+            .into_iter()
+            .filter_map(|user| Some((user.id.clone()?, self.ldap_entry_builder.build_from_keycloak_user(user)?)))
+            .collect();
+        users.into_values().for_each(|user| {
+            organization.add_subordinate(user);
+        });
+        let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
+        for role in realm_roles.into_iter() {
+            // We can unwrap here because we made sure to filter out roles without a name
+            let associated_users = bound_user.keycloak_service_account.query_users_with_role(&role.name.as_ref().unwrap()).await?;
+            if let Some(ldap_group) = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, associated_users) {
+                organization.add_subordinate(ldap_group);
+            }
+        }
+        Ok(())
     }
 }
 

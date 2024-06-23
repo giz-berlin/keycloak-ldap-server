@@ -1,7 +1,7 @@
 use std::{collections::HashMap, string::ToString};
 
 use itertools::Itertools;
-use ldap3_proto::{proto::LdapSubstringFilter, LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
+use ldap3_proto::{proto::LdapSubstringFilter, LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry, LdapSearchScope, SearchRequest};
 use regex::Regex;
 
 use crate::proto;
@@ -34,7 +34,7 @@ impl LdapEntryBuilder {
 
     /// The root-DSE: Provides meta-information on what functionality our server offers.
     pub fn rootdse(&self) -> LdapEntry {
-        let mut entry = LdapEntry::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
+        let mut entry = LdapEntry::new("".to_string(), vec!["OpenLDAProotDSE".to_string()]);
         entry.set_attribute("namingContexts", vec![self.base_distinguished_name.clone()]);
         entry.set_attribute("supportedLDAPVersion", vec!["3".to_string()]);
         // This is really just a dummy schema entry, see Self::subschema.
@@ -62,29 +62,31 @@ impl LdapEntryBuilder {
         // This type of objectclass appears to be one of the few ones that is not actually
         // a subclass of top as constructed by Self::new. It still has an objectclass attribute, though,
         // so that should be fine as well.
-        LdapEntry::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
+        LdapEntry::new("cn=subschema".to_string(), vec!["subschema".to_string()])
     }
 
     /// The root of our Directory Information Tree. Every entry is contained in the naming context
     /// of our organization, meaning it will be a subordinate of this entry.
     pub fn organization(&self) -> LdapEntry {
-        let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()], true);
+        let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()]);
         entry.set_attribute("organizationName", vec![self.organization_name.clone()]);
         entry
     }
 
+    /// The DN of a user in our LDAP tree.
+    pub fn user_dn(&self, user_id: &str) -> String {
+        "cn=".to_owned() + user_id + "," + &self.base_distinguished_name
+    }
+
     /// Convert a keycloak user to its corresponding LDAP representation.
     pub fn build_from_keycloak_user(&self, user: keycloak::types::UserRepresentation) -> Option<LdapEntry> {
-        let user_id = user.id.clone()?;
-        let dn = "cn=".to_owned() + &user_id + "," + &self.base_distinguished_name;
         let mut entry = LdapEntry::new(
-            dn,
+            self.user_dn(user.id.as_ref()?),
             vec![
                 "inetOrgPerson".to_string(),
                 "organizationalPerson".to_string(),
                 "person".to_string(),
             ],
-            false,
         );
         // No matter the extractor, the LDAP specification says that we need to have an
         // attribute matching the identifier used in the dsn
@@ -93,25 +95,45 @@ impl LdapEntryBuilder {
 
         Some(entry)
     }
+
+    /// Convert a keycloak role and the associated users into a corresponding LDAP group.
+    pub fn build_from_keycloak_role_with_associated_users(
+        &self,
+        role: keycloak::types::RoleRepresentation,
+        users: Vec<keycloak::types::UserRepresentation>,
+    ) -> Option<LdapEntry> {
+        let mut entry = LdapEntry::new(
+            "ou=".to_owned() + role.name.as_ref()? + "," + &self.base_distinguished_name,
+            vec!["groupOfUniqueNames".to_string()],
+        );
+        entry.set_attribute("cn", vec![role.name.clone()?]);
+        entry.set_attribute("ou", vec![role.name?]);
+        entry.set_attribute("uniqueMember", users.into_iter().filter_map(|user| Some(self.user_dn(&user.id?))).collect());
+        Some(entry)
+    }
 }
 
 /// A data class representing an entry in our directory.
 pub struct LdapEntry {
     pub dn: String,
     attributes: HashMap<String, Vec<String>>,
-    has_subordinates: bool,
+    subordinates: Vec<LdapEntry>,
 }
 
 impl LdapEntry {
-    pub fn new(dn: String, mut class: Vec<String>, has_subordinates: bool) -> Self {
+    pub fn new(dn: String, mut class: Vec<String>) -> Self {
         let mut entry = LdapEntry {
             dn,
             attributes: HashMap::new(),
-            has_subordinates,
+            subordinates: Vec::new(),
         };
         class.push("top".to_string()); // Every entry belongs to this class
         entry.set_attribute("objectClass", class);
         entry
+    }
+
+    fn is_root(&self) -> bool {
+        self.dn.is_empty()
     }
 
     /// Sets an attribute for this entry. As LDAP is case-insensitive regarding attribute names,
@@ -131,10 +153,85 @@ impl LdapEntry {
         Some((attribute_name, self.get_attribute(attribute_name)?))
     }
 
+    /// Add another ldap entry as a subordinate of this entry.
+    /// Will make sure that this connection is actually valid, e.g., the DN of this entry
+    /// must be part of the DN of the subordinate.
+    /// If this check fails, this method will panic instead of returning an error, because
+    /// failing to satisfy this constraint is considered a programming mistake.
+    pub fn add_subordinate(&mut self, subordinate: LdapEntry) {
+        assert!(subordinate.dn.ends_with(&self.dn));
+        self.subordinates.push(subordinate);
+    }
+
+    /// Find all entries satisfying the given search request in the subtree of this entry.
+    pub fn find(&self, search_request: &SearchRequest) -> Result<Vec<LdapSearchResultEntry>, proto::LdapError> {
+        let mut results = Vec::new();
+        if search_request.base == self.dn {
+            // Should we add ourselves?
+            match search_request.scope {
+                LdapSearchScope::Base => {
+                    if self.matches_filter(&search_request.filter)? {
+                        results.push(self.new_search_result(&search_request.attrs))
+                    }
+                }
+                LdapSearchScope::Subtree => {
+                    // The rootDSE should not be included itself in subtree searches.
+                    if !self.is_root() && self.matches_filter(&search_request.filter)? {
+                        results.push(self.new_search_result(&search_request.attrs));
+                    }
+                }
+                _ => (),
+            }
+
+            // What about our subordinates?
+            if search_request.scope != LdapSearchScope::Base {
+                let subsearch_scope = match search_request.scope {
+                    LdapSearchScope::Subtree | LdapSearchScope::Children => {
+                        // Recursively add the whole subtree while still honoring the other search
+                        // parameters.
+                        LdapSearchScope::Subtree
+                    }
+                    LdapSearchScope::OneLevel => {
+                        // Tell all subordinates to only add themselves while still honoring the other
+                        // search parameters.
+                        LdapSearchScope::Base
+                    },
+                    _ => panic!("This code path should not be reachable.")
+                };
+
+                for subordinate in self.subordinates.iter() {
+                    results.append(&mut subordinate.find(&SearchRequest {
+                        base: subordinate.dn.clone(),
+                        scope: subsearch_scope.clone(),
+                        ..search_request.clone()
+                    })?);
+                }
+            }
+
+            return Ok(results);
+        }
+
+        // This search request does not apply to us as base, but it might apply to some of our
+        // subordinates.
+        for subordinate in self.subordinates.iter() {
+            if search_request.base.ends_with(&subordinate.dn) {
+                results.append(&mut subordinate.find(search_request)?)
+            }
+        }
+
+        if results.is_empty() {
+            return Err(proto::LdapError(
+                LdapResultCode::NoSuchObject,
+                "LDAP Search failure - invalid basedn or too deep nesting".to_string(),
+            ));
+        }
+        Ok(results)
+    }
+
     /// The client appears to have searched for this entry. Convert this entry into the data
     /// format that will be sent over the wire, only including the attributes that the client requested.
     /// Note that this method will NOT check whether this entry matches the filter specified by the client.
-    pub fn new_search_result(&self, requested_attributes: &[String]) -> LdapSearchResultEntry {
+    fn new_search_result(&self, requested_attributes: &[String]) -> LdapSearchResultEntry {
         let all_requested = requested_attributes.is_empty() ||
             // We don't have any operational attributes, so this is equivalent
             requested_attributes.iter().any(|attr| attr == "*" || attr == "+");
@@ -160,7 +257,7 @@ impl LdapEntry {
         if let Some(attr) = requested_attributes.iter().find(|attr| attr.to_lowercase() == "hassubordinates") {
             result.attributes.push(LdapPartialAttribute {
                 atype: attr.to_string(), // We ensure to retain the casing specified by the client.
-                vals: vec![self.has_subordinates.to_string().into_bytes()],
+                vals: vec![(!self.subordinates.is_empty()).to_string().into_bytes()],
             });
         }
 
@@ -169,7 +266,7 @@ impl LdapEntry {
 
     /// Check whether this entry matches the filter the client specified in its search.
     /// Enforces some limits on how complex that filter is allowed to be.
-    pub fn matches_filter(&self, f: &LdapFilter) -> Result<bool, proto::LdapError> {
+    fn matches_filter(&self, f: &LdapFilter) -> Result<bool, proto::LdapError> {
         let mut max_elements = FILTER_MAX_ELEMENTS;
         self._matches_filter(f, FILTER_MAX_DEPTH, &mut max_elements)
     }
@@ -260,6 +357,85 @@ pub mod tests {
 
     use super::*;
 
+    mod when_finding {
+        use super::*;
+
+        const ENTRY_AT: &str = "dc=a,dc=t";
+        const ENTRY_BT: &str = "dc=b,dc=t";
+        const ENTRY_CAT: &str = "dc=c,dc=a,dc=t";
+        const ENTRY_DAT: &str = "dc=d,dc=a,dc=t";
+
+        #[fixture]
+        fn test_ldap_tree() -> LdapEntry {
+            let mut root = LdapEntry::new("".to_string(), vec![]);
+            let mut at = LdapEntry::new(ENTRY_AT.to_string(), vec!["a".to_string()]);
+            let bt = LdapEntry::new(ENTRY_BT.to_string(), vec!["b".to_string()]);
+            let cat = LdapEntry::new(ENTRY_CAT.to_string(), vec!["c".to_string()]);
+            let dat = LdapEntry::new(ENTRY_DAT.to_string(), vec!["d".to_string()]);
+
+            at.add_subordinate(cat);
+            at.add_subordinate(dat);
+            root.add_subordinate(at);
+            root.add_subordinate(bt);
+            root
+        }
+
+        fn search_request(base: &str, scope: LdapSearchScope, filter: Option<LdapFilter>, attrs: Option<Vec<String>>) -> SearchRequest {
+            SearchRequest {
+                msgid: 0,
+                base: base.to_string(),
+                scope,
+                filter: filter.unwrap_or(LdapFilter::Present("objectclass".to_string())),
+                attrs: attrs.unwrap_or(vec!["objectclass".to_string()]),
+            }
+        }
+
+        #[rstest]
+        #[case::scope_base_root("", LdapSearchScope::Base, vec![""])]
+        #[case::scope_base(ENTRY_AT, LdapSearchScope::Base, vec![ENTRY_AT])]
+        #[case::scope_subtree(ENTRY_AT, LdapSearchScope::Subtree, vec![ENTRY_AT, ENTRY_CAT, ENTRY_DAT])]
+        // Exclude root itself.
+        #[case::root__scope_subtree("", LdapSearchScope::Subtree, vec![ENTRY_AT, ENTRY_CAT, ENTRY_DAT, ENTRY_BT])]
+        #[case::scope_children(ENTRY_AT, LdapSearchScope::Children, vec![ENTRY_CAT, ENTRY_DAT])]
+        #[case::scope_one_level("", LdapSearchScope::OneLevel, vec![ENTRY_AT, ENTRY_BT])]
+        fn then_find_correct_entries(test_ldap_tree: LdapEntry, #[case] search_base: &str, #[case] search_scope: LdapSearchScope, #[case] expected_results: Vec<&str>) {
+            // when
+            let results = test_ldap_tree.find(
+                &search_request(search_base, search_scope, None, None)
+            ).unwrap();
+
+            // then
+            assert_eq!(expected_results.len(), results.len());
+            assert!(expected_results.into_iter().all(|exp| results.iter().any(|e| e.dn == exp)));
+        }
+
+        #[rstest]
+        fn then_honour_filter(test_ldap_tree: LdapEntry) {
+            // when
+            let results = test_ldap_tree.find(
+                &search_request("", LdapSearchScope::Children, Some(LdapFilter::Equality("objectClass".to_string(), "a".to_string())), None)
+            ).unwrap();
+
+            // then
+            assert_eq!(1, results.len());
+            assert!(results.iter().any(|e| e.dn == ENTRY_AT));
+        }
+
+        #[rstest]
+        fn then_honour_attrs(test_ldap_tree: LdapEntry) {
+            // when
+            let results = test_ldap_tree.find(
+                &search_request(ENTRY_AT, LdapSearchScope::Base, None, Some(vec!["objectClass".to_string()]))
+            ).unwrap();
+
+            // then
+            assert_eq!(1, results.len());
+            let attrs = &results.get(0).unwrap().attributes;
+            assert_eq!(1, attrs.len());
+            assert_eq!("objectClass", attrs.get(0).unwrap().atype)
+        }
+    }
+
     mod when_creating_search_result {
         use super::*;
 
@@ -268,7 +444,7 @@ pub mod tests {
 
         #[fixture]
         fn entry_with_some_attributes() -> LdapEntry {
-            let mut entry = LdapEntry::new(DUMMY_DN.to_string(), vec![DUMMY_CLASS.to_string()], true);
+            let mut entry = LdapEntry::new(DUMMY_DN.to_string(), vec![DUMMY_CLASS.to_string()]);
             entry.set_attribute("abc", vec!["abc".to_string()]);
             entry.set_attribute("def", vec!["def".to_string()]);
             entry.set_attribute("ghi", vec!["ghi".to_string()]);
@@ -357,7 +533,10 @@ pub mod tests {
         }
 
         #[rstest]
-        fn then_add_subordinates_info_when_explicitly_requested(entry_with_some_attributes: LdapEntry) {
+        fn then_entry_with_subordinates_has_subordinates(mut entry_with_some_attributes: LdapEntry) {
+            // given
+            entry_with_some_attributes.add_subordinate(LdapEntry::new("x,".to_string() + DUMMY_DN, vec![]));
+
             // when
             let result = entry_with_some_attributes.new_search_result(&["hasSubordinates".to_string()]);
 
@@ -365,6 +544,17 @@ pub mod tests {
             assert_eq!("hasSubordinates", result.attributes.get(0).unwrap().atype);
             let has_subordinates_str = std::str::from_utf8(result.attributes.get(0).unwrap().vals.get(0).unwrap()).unwrap();
             assert_eq!("true", has_subordinates_str);
+        }
+
+        #[rstest]
+        fn then_entry_without_subordinates_has_no_subordinates(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["hasSubordinates".to_string()]);
+
+            // then
+            assert_eq!("hasSubordinates", result.attributes.get(0).unwrap().atype);
+            let has_subordinates_str = std::str::from_utf8(result.attributes.get(0).unwrap().vals.get(0).unwrap()).unwrap();
+            assert_eq!("false", has_subordinates_str);
         }
     }
 
@@ -375,7 +565,7 @@ pub mod tests {
 
         #[fixture]
         fn dummy_entry() -> LdapEntry {
-            LdapEntry::new("".to_string(), Vec::new(), false)
+            LdapEntry::new("".to_string(), Vec::new())
         }
 
         fn matching_filter() -> LdapFilter {
