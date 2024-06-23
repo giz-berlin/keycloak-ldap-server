@@ -111,10 +111,12 @@ mod client {
 
         /// Query users associated to a realm role.
         pub async fn query_users_with_role(&self, role_name: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
+            let url_safe_role_name = url::form_urlencoded::byte_serialize(role_name.as_bytes()).collect::<String>();
+
             error_convert_and_filter!(
                 "role_users",
                 self.client
-                    .realm_roles_with_role_name_users_get(&self.target_realm, role_name, None, None)
+                    .realm_roles_with_role_name_users_get(&self.target_realm, &url_safe_role_name, None, None)
                     .await
             )
         }
