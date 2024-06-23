@@ -1,3 +1,8 @@
+use crate::proto;
+
+#[mockall_double::double]
+pub use client::ServiceAccountClient;
+
 /// A builder to construct keycloak service account clients for a pre-configured Keycloak server and realm.
 pub struct ServiceAccountClientBuilder {
     keycloak_address: String,
@@ -11,7 +16,7 @@ impl ServiceAccountClientBuilder {
 
     /// Construct a new client using provided service account credentials.
     /// Will verify that the credentials authenticate successfully.
-    pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> anyhow::Result<ServiceAccountClient> {
+    pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> Result<ServiceAccountClient, proto::LdapError> {
         // Note that the token we receive is not validated, but that might be fine in our case.
         // Also, since the acquire method is not public, we need to do some API request to validate we actually have a working client...
         let keycloak_client =
@@ -22,19 +27,17 @@ impl ServiceAccountClientBuilder {
             self.realm.clone(),
         );
 
-        match service_account.query_users(1).await {
-            Ok(_) => Ok(service_account),
-            Err(e) => anyhow::bail!("Service account appears to have no access to keycloak: {:?}", e),
-        }
+        service_account.query_users(1).await?;
+        Ok(service_account)
     }
 }
 
-#[mockall_double::double]
-pub use client::ServiceAccountClient;
 mod client {
-    use crate::proto;
+    use std::fmt::{Formatter};
+
     use ldap3_proto::LdapResultCode;
-    use std::fmt::Formatter;
+
+    use super::*;
 
     /// A keycloak service account client that has been verified to authenticate successfully.
     /// Used to retrieve user-information for a single realm.
@@ -50,6 +53,9 @@ mod client {
         ($resource_name:literal, $keycloak_api_call:expr, $filter:expr) => {
             match $keycloak_api_call {
                 Ok(resource) => Ok(resource.into_iter().filter($filter).collect()),
+                Err(keycloak::KeycloakError::ReqwestFailure(_)) => {
+                    return Err(proto::LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak.".to_string()))
+                }
                 Err(e) => {
                     log::error!("Could not fetch {} from keycloak: {:?}", $resource_name, e);
                     return Err(proto::LdapError(

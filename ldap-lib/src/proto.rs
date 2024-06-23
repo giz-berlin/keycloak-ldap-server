@@ -108,6 +108,10 @@ impl LdapHandler {
                     keycloak_service_account: service_account,
                 })
             }
+            Err(LdapError(LdapResultCode::Unavailable, _)) => {
+                log::error!("Session {} || LDAP Bind failure, could not connect to keycloak", session_id);
+                Err(LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak".to_string()))
+            },
             Err(e) => {
                 log::error!("Session {} || LDAP Bind failure, could not authenticate against keycloak, {:?}", session_id, e);
                 Err(LdapError(
