@@ -30,6 +30,7 @@ pub enum LdapResponseState {
 pub struct LdapHandler {
     keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
     num_users_to_fetch: i32,
+    include_group_info: bool,
     distinguished_name_regex: Regex,
     ldap_entry_builder: entry::LdapEntryBuilder,
 }
@@ -38,6 +39,7 @@ impl LdapHandler {
     pub fn new(
         base_distinguished_name: String,
         num_users_to_fetch: i32,
+        include_group_info: bool,
         keycloak_service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
         ldap_entry_builder: entry::LdapEntryBuilder,
     ) -> Self {
@@ -48,6 +50,7 @@ impl LdapHandler {
         LdapHandler {
             keycloak_service_account_builder,
             num_users_to_fetch,
+            include_group_info,
             distinguished_name_regex,
             ldap_entry_builder,
         }
@@ -141,6 +144,8 @@ impl LdapHandler {
         Ok(result_messages)
     }
 
+    /// Load user and group information from keycloak and insert them as subordinates of the organization entry.
+    /// Will only load groups if the handler was configured to do so.
     async fn query_keycloak(&self, organization: &mut entry::LdapEntry, bound_user: &LdapBindInfo) -> Result<(), LdapError> {
         let users: std::collections::HashMap<String, entry::LdapEntry> = bound_user
             .keycloak_service_account
@@ -152,12 +157,16 @@ impl LdapHandler {
         users.into_values().for_each(|user| {
             organization.add_subordinate(user);
         });
-        let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
-        for role in realm_roles.into_iter() {
-            // We can unwrap here because we made sure to filter out roles without a name
-            let associated_users = bound_user.keycloak_service_account.query_users_with_role(&role.name.as_ref().unwrap()).await?;
-            if let Some(ldap_group) = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, associated_users) {
-                organization.add_subordinate(ldap_group);
+        if self.include_group_info {
+            let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
+            for role in realm_roles.into_iter() {
+                let associated_users = bound_user.keycloak_service_account.query_users_with_role(
+                    // We can unwrap here because we made sure to filter out roles without a name
+                    &role.name.as_ref().unwrap()
+                ).await?;
+                if let Some(ldap_group) = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, associated_users) {
+                    organization.add_subordinate(ldap_group);
+                }
             }
         }
         Ok(())

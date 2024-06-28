@@ -29,7 +29,8 @@ As the LDAP library will handle argument parsing and logging, your main function
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{})).await
+    let include_group_info = true;
+    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info).await
 }
 ```
 
@@ -78,3 +79,5 @@ LDAPTLS_CACERT=ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000
 As LDAP bind authentication, you should configure the client credentials of a Keycloak service account that needs to have access to the realm and has the `view-users` service account role assigned. Otherwise, the API will report an authentication error as it is not able to access user information, even if the client credentials are valid.
 
 The default keycloak instance will have a client `ldap_bridge` with secret `ldap_bridge_secret` properly set up.
+
+Note that the API will only return groups if the use-case-specific binary you run is starting the LDAP server with `include_group_info=true`.
