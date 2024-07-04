@@ -206,8 +206,8 @@ impl LdapEntry {
                         // Tell all subordinates to only add themselves while still honoring the other
                         // search parameters.
                         LdapSearchScope::Base
-                    },
-                    _ => panic!("This code path should not be reachable.")
+                    }
+                    _ => panic!("This code path should not be reachable."),
                 };
 
                 for subordinate in self.subordinates.iter() {
@@ -409,11 +409,14 @@ pub mod tests {
         #[case::root__scope_subtree("", LdapSearchScope::Subtree, vec![ENTRY_AT, ENTRY_CAT, ENTRY_DAT, ENTRY_BT])]
         #[case::scope_children(ENTRY_AT, LdapSearchScope::Children, vec![ENTRY_CAT, ENTRY_DAT])]
         #[case::scope_one_level("", LdapSearchScope::OneLevel, vec![ENTRY_AT, ENTRY_BT])]
-        fn then_find_correct_entries(test_ldap_tree: LdapEntry, #[case] search_base: &str, #[case] search_scope: LdapSearchScope, #[case] expected_results: Vec<&str>) {
+        fn then_find_correct_entries(
+            test_ldap_tree: LdapEntry,
+            #[case] search_base: &str,
+            #[case] search_scope: LdapSearchScope,
+            #[case] expected_results: Vec<&str>,
+        ) {
             // when
-            let results = test_ldap_tree.find(
-                &search_request(search_base, search_scope, None, None)
-            ).unwrap();
+            let results = test_ldap_tree.find(&search_request(search_base, search_scope, None, None)).unwrap();
 
             // then
             assert_eq!(expected_results.len(), results.len());
@@ -423,9 +426,14 @@ pub mod tests {
         #[rstest]
         fn then_honour_filter(test_ldap_tree: LdapEntry) {
             // when
-            let results = test_ldap_tree.find(
-                &search_request("", LdapSearchScope::Children, Some(LdapFilter::Equality("objectClass".to_string(), "a".to_string())), None)
-            ).unwrap();
+            let results = test_ldap_tree
+                .find(&search_request(
+                    "",
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Equality("objectClass".to_string(), "a".to_string())),
+                    None,
+                ))
+                .unwrap();
 
             // then
             assert_eq!(1, results.len());
@@ -435,9 +443,9 @@ pub mod tests {
         #[rstest]
         fn then_honour_attrs(test_ldap_tree: LdapEntry) {
             // when
-            let results = test_ldap_tree.find(
-                &search_request(ENTRY_AT, LdapSearchScope::Base, None, Some(vec!["objectClass".to_string()]))
-            ).unwrap();
+            let results = test_ldap_tree
+                .find(&search_request(ENTRY_AT, LdapSearchScope::Base, None, Some(vec!["objectClass".to_string()])))
+                .unwrap();
 
             // then
             assert_eq!(1, results.len());

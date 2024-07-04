@@ -1,8 +1,8 @@
-use crate::proto;
-
 /// This will use the real or the mock implementation, depending on whether we are compiling for tests or not.
 #[mockall_double::double]
 pub use client::ServiceAccountClient;
+
+use crate::proto;
 
 /// A builder to construct keycloak service account clients for a pre-configured Keycloak server and realm.
 pub struct ServiceAccountClientBuilder {
@@ -35,7 +35,7 @@ impl ServiceAccountClientBuilder {
 
 #[cfg(not(test))]
 mod client {
-    use std::fmt::{Formatter};
+    use std::fmt::Formatter;
 
     use ldap3_proto::LdapResultCode;
 
@@ -56,7 +56,10 @@ mod client {
             match $keycloak_api_call {
                 Ok(resource) => Ok(resource.into_iter().filter($filter).collect()),
                 Err(keycloak::KeycloakError::ReqwestFailure(_)) => {
-                    return Err(proto::LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak.".to_string()))
+                    return Err(proto::LdapError(
+                        LdapResultCode::Unavailable,
+                        "Could not connect to keycloak.".to_string(),
+                    ))
                 }
                 Err(e) => {
                     log::error!("Could not fetch {} from keycloak: {:?}", $resource_name, e);
@@ -133,8 +136,11 @@ mod client {
 
 #[cfg(test)]
 mod client {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, MutexGuard};
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, MutexGuard},
+    };
+
     use ldap3_proto::LdapResultCode;
 
     use super::*;
@@ -166,26 +172,42 @@ mod client {
                 // If another test fails with a panic, it might fail to unlock the mutex, which
                 // then becomes poisoned.
                 // However, we don't care, as at that point, the mutex is effectively unlocked.
-                Err(poison) => poison.into_inner()
+                Err(poison) => poison.into_inner(),
             };
             _ = MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON.lock().unwrap().insert(instance);
             guard
         }
 
         pub fn set_empty() -> MutexGuard<'static, ()> {
-            Self::set_singleton_instance(MockServiceAccountClient { user_ids: vec![], groups: HashMap::new(), err_code: None })
+            Self::set_singleton_instance(MockServiceAccountClient {
+                user_ids: vec![],
+                groups: HashMap::new(),
+                err_code: None,
+            })
         }
 
         pub fn set_users(user_ids: Vec<&'static str>) -> MutexGuard<'static, ()> {
-            Self::set_singleton_instance(MockServiceAccountClient { user_ids, groups: HashMap::new(), err_code: None })
+            Self::set_singleton_instance(MockServiceAccountClient {
+                user_ids,
+                groups: HashMap::new(),
+                err_code: None,
+            })
         }
 
         pub fn set_users_groups(user_ids: Vec<&'static str>, groups: Vec<(&'static str, Vec<usize>)>) -> MutexGuard<'static, ()> {
-            Self::set_singleton_instance(MockServiceAccountClient { user_ids, groups: groups.into_iter().collect(), err_code: None })
+            Self::set_singleton_instance(MockServiceAccountClient {
+                user_ids,
+                groups: groups.into_iter().collect(),
+                err_code: None,
+            })
         }
 
         pub fn set_err(err_code: LdapResultCode) -> MutexGuard<'static, ()> {
-            Self::set_singleton_instance(MockServiceAccountClient { user_ids: vec![], groups: HashMap::new(), err_code: Some(err_code)})
+            Self::set_singleton_instance(MockServiceAccountClient {
+                user_ids: vec![],
+                groups: HashMap::new(),
+                err_code: Some(err_code),
+            })
         }
     }
 
@@ -200,37 +222,49 @@ mod client {
 
         pub async fn query_users(&self, _size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             if let Some(err_code) = self.err_code.as_ref() {
-                return Err(proto::LdapError(err_code.clone(), "".to_string()))
+                return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
-            Ok(self.user_ids.iter().map(|user_id| keycloak::types::UserRepresentation {
-                id: Some(user_id.to_string()),
-                ..Default::default()
-            }).collect())
+            Ok(self
+                .user_ids
+                .iter()
+                .map(|user_id| keycloak::types::UserRepresentation {
+                    id: Some(user_id.to_string()),
+                    ..Default::default()
+                })
+                .collect())
         }
 
         pub async fn query_named_realm_roles(&self) -> Result<Vec<keycloak::types::RoleRepresentation>, proto::LdapError> {
             if let Some(err_code) = self.err_code.as_ref() {
-                return Err(proto::LdapError(err_code.clone(), "".to_string()))
+                return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
-            Ok(self.groups.iter().map(|(group_name, _)| keycloak::types::RoleRepresentation {
-                name: Some(group_name.to_string()),
-                ..Default::default()
-            }).collect())
+            Ok(self
+                .groups
+                .iter()
+                .map(|(group_name, _)| keycloak::types::RoleRepresentation {
+                    name: Some(group_name.to_string()),
+                    ..Default::default()
+                })
+                .collect())
         }
 
         pub async fn query_users_with_role(&self, role_name: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             if let Some(err_code) = self.err_code.as_ref() {
-                return Err(proto::LdapError(err_code.clone(), "".to_string()))
+                return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
-            Ok(self.groups.get(role_name).unwrap().iter().map(|&user_index| {
-                keycloak::types::UserRepresentation {
+            Ok(self
+                .groups
+                .get(role_name)
+                .unwrap()
+                .iter()
+                .map(|&user_index| keycloak::types::UserRepresentation {
                     id: Some(self.user_ids.get(user_index).unwrap().to_string()),
                     ..Default::default()
-                }
-            }).collect())
+                })
+                .collect())
         }
     }
 }

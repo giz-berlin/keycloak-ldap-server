@@ -114,7 +114,7 @@ impl LdapHandler {
             Err(LdapError(LdapResultCode::Unavailable, _)) => {
                 log::error!("Session {} || LDAP Bind failure, could not connect to keycloak", session_id);
                 Err(LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak".to_string()))
-            },
+            }
             Err(e) => {
                 log::error!("Session {} || LDAP Bind failure, could not authenticate against keycloak, {:?}", session_id, e);
                 Err(LdapError(
@@ -158,10 +158,13 @@ impl LdapHandler {
         if self.include_group_info {
             let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
             for role in realm_roles.into_iter() {
-                let associated_users = bound_user.keycloak_service_account.query_users_with_role(
-                    // We can unwrap here because we made sure to filter out roles without a name
-                    role.name.as_ref().unwrap()
-                ).await?;
+                let associated_users = bound_user
+                    .keycloak_service_account
+                    .query_users_with_role(
+                        // We can unwrap here because we made sure to filter out roles without a name
+                        role.name.as_ref().unwrap(),
+                    )
+                    .await?;
                 let ldap_group = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, &associated_users);
                 for associated_user in associated_users.iter() {
                     if let Some(id) = associated_user.id.as_ref() {
@@ -298,8 +301,7 @@ mod tests {
     }
 
     mod when_search {
-        use ldap3_proto::{LdapFilter, LdapSearchScope};
-        use ldap3_proto::proto::LdapResult;
+        use ldap3_proto::{proto::LdapResult, LdapFilter, LdapSearchScope};
 
         use super::*;
 
@@ -317,7 +319,12 @@ mod tests {
                 base: base.to_string(),
                 scope,
                 filter: filter.unwrap_or(LdapFilter::Present("objectclass".to_string())),
-                attrs: vec!["objectclass".to_string(), "cn".to_string(), "uniqueMember".to_string(), "memberOf".to_string()],
+                attrs: vec![
+                    "objectclass".to_string(),
+                    "cn".to_string(),
+                    "uniqueMember".to_string(),
+                    "memberOf".to_string(),
+                ],
             })
         }
 
@@ -490,10 +497,7 @@ mod tests {
             #[tokio::test]
             async fn then_do_not_return_groups(ldap_handler: LdapHandler) {
                 // given
-                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
-                    vec![DEFAULT_USER_ID],
-                    vec![("group-id", vec![0])]
-                );
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![("group-id", vec![0])]);
 
                 // when
                 let search_request = search_request(DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children, None);
@@ -522,15 +526,13 @@ mod tests {
             #[tokio::test]
             async fn then_do_return_groups(ldap_handler: LdapHandler) {
                 // given
-                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
-                    vec![DEFAULT_USER_ID],
-                    vec![(DEFAULT_GROUP_ID, vec![0])]
-                );
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![(DEFAULT_GROUP_ID, vec![0])]);
 
                 // when
                 let search_request = search_request(
-                    DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children,
-                    Some(LdapFilter::Present("uniqueMember".to_string()))
+                    DEFAULT_BASE_DISTINGUISHED_NAME,
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Present("uniqueMember".to_string())),
                 );
                 let client_session = client_session(true, &ldap_handler).await;
 
@@ -546,13 +548,14 @@ mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![DEFAULT_USER_ID, "another_user"],
-                    vec![(DEFAULT_GROUP_ID, vec![0]), ("another_group", vec![1])]
+                    vec![(DEFAULT_GROUP_ID, vec![0]), ("another_group", vec![1])],
                 );
 
                 // when
                 let search_request = search_request(
-                    DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children,
-                    Some(LdapFilter::Present("uniqueMember".to_string()))
+                    DEFAULT_BASE_DISTINGUISHED_NAME,
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Present("uniqueMember".to_string())),
                 );
                 let client_session = client_session(true, &ldap_handler).await;
 
@@ -571,13 +574,14 @@ mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![DEFAULT_USER_ID, "another_user"],
-                    vec![(DEFAULT_GROUP_ID, vec![0]), ("another_group", vec![1])]
+                    vec![(DEFAULT_GROUP_ID, vec![0]), ("another_group", vec![1])],
                 );
 
                 // when
                 let search_request = search_request(
-                    DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children,
-                    Some(LdapFilter::Present("memberOf".to_string()))
+                    DEFAULT_BASE_DISTINGUISHED_NAME,
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Present("memberOf".to_string())),
                 );
                 let client_session = client_session(true, &ldap_handler).await;
 
