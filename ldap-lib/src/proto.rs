@@ -147,28 +147,38 @@ impl LdapHandler {
     /// Load user and group information from keycloak and insert them as subordinates of the organization entry.
     /// Will only load groups if the handler was configured to do so.
     async fn query_keycloak(&self, organization: &mut entry::LdapEntry, bound_user: &LdapBindInfo) -> Result<(), LdapError> {
-        let users: std::collections::HashMap<String, entry::LdapEntry> = bound_user
+        let mut users: std::collections::HashMap<String, entry::LdapEntry> = bound_user
             .keycloak_service_account
             .query_users(self.num_users_to_fetch)
             .await?
             .into_iter()
             .filter_map(|user| Some((user.id.clone()?, self.ldap_entry_builder.build_from_keycloak_user(user)?)))
             .collect();
-        users.into_values().for_each(|user| {
-            organization.add_subordinate(user);
-        });
+
         if self.include_group_info {
             let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
             for role in realm_roles.into_iter() {
                 let associated_users = bound_user.keycloak_service_account.query_users_with_role(
                     // We can unwrap here because we made sure to filter out roles without a name
-                    &role.name.as_ref().unwrap()
+                    role.name.as_ref().unwrap()
                 ).await?;
-                if let Some(ldap_group) = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, associated_users) {
-                    organization.add_subordinate(ldap_group);
+                let ldap_group = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, &associated_users);
+                for associated_user in associated_users.iter() {
+                    if let Some(id) = associated_user.id.as_ref() {
+                        if let Some(user) = users.get_mut(id) {
+                            user.append_to_attribute("memberOf", ldap_group.dn.clone())
+                        } else {
+                            log::warn!("Role {} is associated to user {}, but that user does not exist!", ldap_group.dn, id);
+                        }
+                    }
                 }
+                organization.add_subordinate(ldap_group);
             }
         }
+
+        users.into_values().for_each(|user| {
+            organization.add_subordinate(user);
+        });
         Ok(())
     }
 }

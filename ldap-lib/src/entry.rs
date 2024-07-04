@@ -97,19 +97,20 @@ impl LdapEntryBuilder {
     }
 
     /// Convert a keycloak role and the associated users into a corresponding LDAP group.
+    /// Should only be called on roles that are guaranteed to have a name set.
     pub fn build_from_keycloak_role_with_associated_users(
         &self,
         role: keycloak::types::RoleRepresentation,
-        users: Vec<keycloak::types::UserRepresentation>,
-    ) -> Option<LdapEntry> {
+        users: &[keycloak::types::UserRepresentation],
+    ) -> LdapEntry {
         let mut entry = LdapEntry::new(
-            "ou=".to_owned() + role.name.as_ref()? + "," + &self.base_distinguished_name,
+            "ou=".to_owned() + role.name.as_ref().unwrap() + "," + &self.base_distinguished_name,
             vec!["groupOfUniqueNames".to_string()],
         );
-        entry.set_attribute("cn", vec![role.name.clone()?]);
-        entry.set_attribute("ou", vec![role.name?]);
-        entry.set_attribute("uniqueMember", users.into_iter().filter_map(|user| Some(self.user_dn(&user.id?))).collect());
-        Some(entry)
+        entry.set_attribute("cn", vec![role.name.clone().unwrap()]);
+        entry.set_attribute("ou", vec![role.name.unwrap()]);
+        entry.set_attribute("uniqueMember", users.iter().filter_map(|user| Some(self.user_dn(user.id.as_ref()?))).collect());
+        entry
     }
 }
 
@@ -140,6 +141,16 @@ impl LdapEntry {
     /// we will convert all attribute names to lower case.
     pub fn set_attribute(&mut self, name: &str, value: Vec<String>) {
         self.attributes.insert(name.to_lowercase(), value);
+    }
+
+    /// Appends a value to the list associated with a attribute. Will create the attribute if
+    /// it does not yet exist.
+    pub fn append_to_attribute(&mut self, name: &str, value: String) {
+        if let Some(entry) = self.attributes.get_mut(name.to_lowercase().as_str()) {
+            entry.push(value);
+        } else {
+            self.set_attribute(name, vec![value]);
+        }
     }
 
     /// Gets the value of an attribute. As LDAP is case-insensitive, query for the lowercased version
