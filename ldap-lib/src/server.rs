@@ -31,12 +31,16 @@ struct CliArguments {
     #[clap(long, default_value = "giz.berlin", help = "The name of the organization as shown by the LDAP base entry")]
     organization_name: String,
 
-    #[clap(long, default_value = "ldap_keycloak_bridge.crt.pem", help = "The TLS certificate used by the LDAP server")]
+    #[clap(
+        long,
+        default_value = "certificates/ldap_keycloak_bridge.crt.pem",
+        help = "The TLS certificate used by the LDAP server"
+    )]
     certificate: String,
 
     #[clap(
         long,
-        default_value = "ldap_keycloak_bridge.key.pem",
+        default_value = "certificates/ldap_keycloak_bridge.key.pem",
         help = "The TLS certificate private key of the LDAP server"
     )]
     certificate_key: String,
