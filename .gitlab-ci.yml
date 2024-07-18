@@ -37,8 +37,7 @@ e2e-test:
     - job: build
       artifacts: true
   services:
-    # TODO: runner container architecture: https://github.com/keycloak/keycloak/issues/17290
-    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:20.0.1
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:25.0
       alias: keycloak
       command: ["start-dev", "--import-realm"]
       entrypoint:
