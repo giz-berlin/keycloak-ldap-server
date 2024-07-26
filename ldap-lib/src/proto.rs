@@ -156,25 +156,18 @@ impl LdapHandler {
             .collect();
 
         if self.include_group_info {
-            let realm_roles: Vec<keycloak::types::RoleRepresentation> = bound_user.keycloak_service_account.query_named_realm_roles().await?;
-            for role in realm_roles.into_iter() {
-                let associated_users = bound_user
+            let groups: Vec<keycloak::types::GroupRepresentation> = bound_user.keycloak_service_account.query_named_groups().await?;
+            for group in groups.into_iter() {
+                let group_associated_users = bound_user
                     .keycloak_service_account
-                    .query_users_with_role(
-                        // We can unwrap here because we made sure to filter out roles without a name
-                        role.name.as_ref().unwrap(),
+                    .query_users_in_group(
+                        // We can unwrap here because we made sure to filter out groups without a id
+                        group.id.as_ref().unwrap(),
                     )
                     .await?;
-                let ldap_group = self.ldap_entry_builder.build_from_keycloak_role_with_associated_users(role, &associated_users);
-                for associated_user in associated_users.iter() {
-                    if let Some(id) = associated_user.id.as_ref() {
-                        if let Some(user) = users.get_mut(id) {
-                            user.append_to_attribute("memberOf", ldap_group.dn.clone())
-                        } else {
-                            log::warn!("Role {} is associated to user {}, but that user does not exist!", ldap_group.dn, id);
-                        }
-                    }
-                }
+                let ldap_group = self
+                    .ldap_entry_builder
+                    .build_from_keycloak_group_with_associated_users(group, &mut users, &group_associated_users);
                 organization.add_subordinate(ldap_group);
             }
         }
@@ -199,17 +192,22 @@ mod tests {
     const DEFAULT_USERS_TO_FETCH: i32 = 5;
 
     #[fixture]
-    fn ldap_handler() -> LdapHandler {
+    fn entry_builder() -> entry::LdapEntryBuilder {
+        entry::LdapEntryBuilder::new(
+            DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
+            DEFAULT_ORGANIZATION_NAME.to_string(),
+            Box::new(entry::tests::DummyExtractor {}),
+        )
+    }
+
+    #[fixture]
+    fn ldap_handler(entry_builder: entry::LdapEntryBuilder) -> LdapHandler {
         LdapHandler::new(
             DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             DEFAULT_USERS_TO_FETCH,
             false,
             keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
-            entry::LdapEntryBuilder::new(
-                DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
-                DEFAULT_ORGANIZATION_NAME.to_string(),
-                Box::new(entry::tests::DummyExtractor {}),
-            ),
+            entry_builder,
         )
     }
 
@@ -306,12 +304,6 @@ mod tests {
         use super::*;
 
         const DEFAULT_USER_ID: &str = "s0m3-us3r";
-        fn user_dn(user_id: &str) -> String {
-            "cn=".to_string() + user_id + "," + DEFAULT_BASE_DISTINGUISHED_NAME
-        }
-        fn group_dn(group_id: &str) -> String {
-            "ou=".to_string() + group_id + "," + DEFAULT_BASE_DISTINGUISHED_NAME
-        }
 
         fn search_request(base: &str, scope: LdapSearchScope, filter: Option<LdapFilter>) -> ServerOps {
             ServerOps::Search(SearchRequest {
@@ -460,12 +452,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn specifically_for_entry__then_return_result(ldap_handler: LdapHandler) {
+        async fn specifically_for_entry__then_return_result(ldap_handler: LdapHandler, entry_builder: entry::LdapEntryBuilder) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_users(vec![DEFAULT_USER_ID]);
 
             // when
-            let search_request = search_request(user_dn(DEFAULT_USER_ID).as_str(), LdapSearchScope::Base, None);
+            let search_request = search_request(entry_builder.user_dn(DEFAULT_USER_ID).as_str(), LdapSearchScope::Base, None);
             let client_session = client_session(true, &ldap_handler).await;
 
             let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
@@ -514,8 +506,8 @@ mod tests {
             use super::*;
 
             #[fixture]
-            fn ldap_handler() -> LdapHandler {
-                let mut handler = super::ldap_handler();
+            fn ldap_handler(entry_builder: entry::LdapEntryBuilder) -> LdapHandler {
+                let mut handler = super::ldap_handler(entry_builder);
                 handler.include_group_info = true;
                 handler
             }
@@ -544,7 +536,7 @@ mod tests {
 
             #[rstest]
             #[tokio::test]
-            async fn then_assign_users_to_groups(ldap_handler: LdapHandler) {
+            async fn then_assign_users_to_groups(ldap_handler: LdapHandler, entry_builder: entry::LdapEntryBuilder) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![DEFAULT_USER_ID, "another_user"],
@@ -564,13 +556,14 @@ mod tests {
                 // then
                 assert_search_result_contains_exactly_entries_satisfying!(
                     search_result, LdapResultCode::Success,
-                    "uniqueMember" => user_dn(DEFAULT_USER_ID), "uniqueMember" => user_dn("another_user")
+                    "uniqueMember" => entry_builder.user_dn(DEFAULT_USER_ID),
+                    "uniqueMember" => entry_builder.user_dn("another_user")
                 );
             }
 
             #[rstest]
             #[tokio::test]
-            async fn then_assign_groups_to_users(ldap_handler: LdapHandler) {
+            async fn then_assign_groups_to_users(ldap_handler: LdapHandler, entry_builder: entry::LdapEntryBuilder) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![DEFAULT_USER_ID, "another_user"],
@@ -590,7 +583,8 @@ mod tests {
                 // then
                 assert_search_result_contains_exactly_entries_satisfying!(
                     search_result, LdapResultCode::Success,
-                    "memberOf" => group_dn(DEFAULT_GROUP_ID), "memberOf" => group_dn("another_group")
+                    "memberOf" => entry_builder.group_dn(DEFAULT_GROUP_ID),
+                    "memberOf" => entry_builder.group_dn("another_group")
                 );
             }
         }

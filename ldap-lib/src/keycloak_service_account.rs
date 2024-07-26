@@ -105,23 +105,23 @@ mod client {
             )
         }
 
-        /// Query all realm roles of realm we configured for this client, disregarding roles that do not have a name.
-        pub async fn query_named_realm_roles(&self) -> Result<Vec<keycloak::types::RoleRepresentation>, proto::LdapError> {
+        /// Query all groups in realm we configured for this client, disregarding groups that do not have an id or a name.
+        pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
             error_convert_and_filter!(
-                "roles",
-                self.client.realm_roles_get(&self.target_realm, None, None, Some(-1), None).await,
-                |role| role.name.is_some()
+                "groups",
+                self.client
+                    .realm_groups_get(&self.target_realm, Some(false), None, None, None, Some(true), None, None)
+                    .await,
+                |group| group.id.is_some() && group.name.is_some()
             )
         }
 
-        /// Query users associated to a realm role.
-        pub async fn query_users_with_role(&self, role_name: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            let url_safe_role_name = url::form_urlencoded::byte_serialize(role_name.as_bytes()).collect::<String>();
-
+        /// Query users belonging to a group.
+        pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             error_convert_and_filter!(
-                "role_users",
+                "users_in_group",
                 self.client
-                    .realm_roles_with_role_name_users_get(&self.target_realm, &url_safe_role_name, None, None)
+                    .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, None)
                     .await
             )
         }
@@ -235,7 +235,7 @@ mod client {
                 .collect())
         }
 
-        pub async fn query_named_realm_roles(&self) -> Result<Vec<keycloak::types::RoleRepresentation>, proto::LdapError> {
+        pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
             if let Some(err_code) = self.err_code.as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
@@ -243,21 +243,22 @@ mod client {
             Ok(self
                 .groups
                 .iter()
-                .map(|(group_name, _)| keycloak::types::RoleRepresentation {
+                .map(|(group_name, _)| keycloak::types::GroupRepresentation {
+                    id: Some(group_name.to_string()),
                     name: Some(group_name.to_string()),
                     ..Default::default()
                 })
                 .collect())
         }
 
-        pub async fn query_users_with_role(&self, role_name: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
+        pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             if let Some(err_code) = self.err_code.as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
             Ok(self
                 .groups
-                .get(role_name)
+                .get(group_id)
                 .unwrap()
                 .iter()
                 .map(|&user_index| keycloak::types::UserRepresentation {

@@ -96,20 +96,41 @@ impl LdapEntryBuilder {
         Some(entry)
     }
 
-    /// Convert a keycloak role and the associated users into a corresponding LDAP group.
-    /// Should only be called on roles that are guaranteed to have a name set.
-    pub fn build_from_keycloak_role_with_associated_users(
+    /// The DN of a group in our LDAP tree.
+    pub fn group_dn(&self, group_id: &str) -> String {
+        "ou=".to_owned() + group_id + "," + &self.base_distinguished_name
+    }
+
+    /// Convert a keycloak group and the associated users into a corresponding LDAP group.
+    /// Will assign the users to the group and the group to the users.
+    /// Note that there might be users associated to the group that we "don't know" in the sense
+    /// that they exist in the keycloak, but we cannot see them when querying for all users.
+    /// We will ignore these because adding users to the group that we cannot query for later does not make much sense.
+    /// This method should ONLY be called on groups that are guaranteed to have id and name set.
+    pub fn build_from_keycloak_group_with_associated_users(
         &self,
-        role: keycloak::types::RoleRepresentation,
-        users: &[keycloak::types::UserRepresentation],
+        group: keycloak::types::GroupRepresentation,
+        known_users: &mut HashMap<String, LdapEntry>,
+        all_group_associated_users: &[keycloak::types::UserRepresentation],
     ) -> LdapEntry {
-        let mut entry = LdapEntry::new(
-            "ou=".to_owned() + role.name.as_ref().unwrap() + "," + &self.base_distinguished_name,
-            vec!["groupOfUniqueNames".to_string()],
-        );
-        entry.set_attribute("cn", vec![role.name.clone().unwrap()]);
-        entry.set_attribute("ou", vec![role.name.unwrap()]);
-        entry.set_attribute("uniqueMember", users.iter().filter_map(|user| Some(self.user_dn(user.id.as_ref()?))).collect());
+        let mut entry = LdapEntry::new(self.group_dn(group.id.as_ref().unwrap()), vec!["groupOfUniqueNames".to_string()]);
+        entry.set_attribute("cn", vec![group.name.clone().unwrap()]);
+        entry.set_attribute("ou", vec![group.id.unwrap()]);
+
+        // See which of the users associated to the group are actually known to us.
+        let mut group_members = vec![];
+        for associated_user in all_group_associated_users.iter() {
+            if let Some(id) = associated_user.id.as_ref() {
+                if let Some(user) = known_users.get_mut(id) {
+                    user.append_to_attribute("memberOf", entry.dn.clone());
+                    group_members.push(self.user_dn(id));
+                } else {
+                    log::warn!("Group {} contains user {}, but that user does not exist!", entry.dn, id);
+                }
+            }
+        }
+        entry.set_attribute("uniqueMember", group_members);
+
         entry
     }
 }
