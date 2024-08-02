@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     str::FromStr,
     sync::Arc,
-    time::Duration,
+    time,
 };
 
 use anyhow::Context;
@@ -15,7 +15,7 @@ use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{entry, keycloak_service_account, proto, server, tls};
+use crate::{cache, entry, keycloak_service_account, proto, server, tls};
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
@@ -62,6 +62,23 @@ struct CliArguments {
 
     #[clap(short, long, default_value = "-1", help = "Number of users to fetch from keycloak")]
     num_users: i32,
+
+    #[clap(
+        long,
+        default_value = "55",
+        help = "Time to wait before sending first response in a session, because some client implementations will miss the first response if it comes in too fast."
+    )]
+    session_first_answer_delay_millis: u64,
+
+    #[clap(long, default_value = "30", help = "How often to update entries in the LDAP cache.")]
+    cache_update_interval_secs: u64,
+
+    #[clap(
+        long,
+        default_value = "3600",
+        help = "How long to wait before pruning LDAP cache entries that are not being accessed."
+    )]
+    cache_entry_max_inactive_secs: u64,
 
     #[clap(flatten)]
     log_level: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
@@ -121,18 +138,25 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let handler = Arc::from(proto::LdapHandler::new(
-        args.base_distinguished_name.clone(),
+    let handler = Arc::from(proto::LdapHandler::new(cache::LdapTreeCache::new(
+        keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
         args.num_users,
         include_group_info,
-        keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
+        time::Duration::from_secs(args.cache_update_interval_secs),
+        time::Duration::from_secs(args.cache_entry_max_inactive_secs),
         entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
-    ));
+    )));
 
     loop {
         match listener.accept().await {
             Ok((tcpstream, client_socket_addr)) => {
-                tokio::spawn(client_session(handler.clone(), tcpstream, ssl_acceptor.clone(), client_socket_addr));
+                tokio::spawn(client_session(
+                    handler.clone(),
+                    tcpstream,
+                    ssl_acceptor.clone(),
+                    client_socket_addr,
+                    time::Duration::from_millis(args.session_first_answer_delay_millis),
+                ));
             }
             Err(e) => {
                 log::error!("TCP listener accept error, continuing -> {:?}", e);
@@ -150,6 +174,7 @@ async fn client_session(
     tcp_stream: tokio::net::TcpStream,
     ssl_acceptor: Option<SslAcceptor>,
     client_address: net::SocketAddr,
+    delay_before_first_answer: time::Duration,
 ) -> anyhow::Result<()> {
     let mut session = LdapClientSession::new();
     log::info!("Starting new client session {}", session);
@@ -160,9 +185,9 @@ async fn client_session(
         tokio_openssl::SslStream::accept(Pin::new(&mut ssl_stream))
             .await
             .context("Cannot accept SSL stream")?;
-        _client_session(&mut session, ldap, ssl_stream, client_address).await
+        _client_session(&mut session, ldap, ssl_stream, client_address, delay_before_first_answer).await
     } else {
-        _client_session(&mut session, ldap, tcp_stream, client_address).await
+        _client_session(&mut session, ldap, tcp_stream, client_address, delay_before_first_answer).await
     };
     if let Err(e) = err {
         log::error!("An error occurred while handling client session {}: {:?}", session.id, e);
@@ -173,7 +198,13 @@ async fn client_session(
 }
 
 /// Handle receiving and sending of LDAP messages for a client session.
-async fn _client_session<T>(session: &mut LdapClientSession, ldap: Arc<proto::LdapHandler>, stream: T, client_address: net::SocketAddr) -> anyhow::Result<()>
+async fn _client_session<T>(
+    session: &mut LdapClientSession,
+    ldap: Arc<proto::LdapHandler>,
+    stream: T,
+    client_address: net::SocketAddr,
+    delay_before_first_answer: time::Duration,
+) -> anyhow::Result<()>
 where
     T: AsyncRead + AsyncWrite,
 {
@@ -183,11 +214,12 @@ where
 
     // For some reason, some client implementations (namely Apache Directory Studio) appear to just
     // miss our first response if we are too fast :( It will then time out telling us we did not answer.
-    // Therefore, we just wait a little before we start processing the first message.
-    // This is the lowest delay value for which it appears to work reliably.
+    // Therefore, we wait the configured amount of time before we start processing the first message.
     // After the first message exchange, the response listener of the client appears to be properly
     // set up and no further delay is necessary.
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    if !delay_before_first_answer.is_zero() {
+        tokio::time::sleep(delay_before_first_answer).await;
+    }
 
     while let Some(Ok(protomsg)) = ldap_reader.next().await {
         log::trace!(

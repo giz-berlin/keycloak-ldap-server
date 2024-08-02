@@ -9,6 +9,10 @@ Note that the API does only support read operations and offers a limited subset 
 - We do not honour the size limit imposed by the client or perform any pagination.
 - We ignore the ctrl parameter.
 
+## Disclaimer
+
+This projects implements caching to vastly reduce the number of required Keycloak queries. For this reason, it may take a couple of seconds before changes in the Keycloak become visible through our API (how long exactly depends on how the bridge is configured).
+
 ## Use Cases
 
 Currently, this service is intended to provide the following use cases:
