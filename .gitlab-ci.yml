@@ -30,3 +30,40 @@ test:
   script:
     - cargo test
   needs: []
+
+e2e-test:
+  stage: test
+  needs:
+    - job: build
+      artifacts: true
+  services:
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:25.0
+      alias: keycloak
+      command: ["start-dev", "--import-realm"]
+      entrypoint:
+        # Sadly, waiting until everything is checked out and set up is not supported out of the box :(
+        # Using workaround from https://gitlab.com/gitlab-org/gitlab-runner/-/issues/3210#note_380999884
+        - '/bin/bash'
+        - '-c'
+        - |
+          # wait for project clone/checkout
+          # i'm relying on git index to indicate the clone/checkout is done
+          echo "Waiting for git checkout"
+          until [ -f "$CI_PROJECT_DIR/.git/index" ]; do sleep 0.1; done;
+          echo "Waiting for git lock to be released"
+          # especially after the lock file has been removed
+          while [ -f "$CI_PROJECT_DIR/.git/index.lock" ]; do sleep 0.1; done;
+          # copy/setup files
+          cp -r "$CI_PROJECT_DIR/e2e-test/keycloak_realm_config" /opt/keycloak/data/import
+          # pass control to the default image entrypoint
+          exec /opt/keycloak/bin/kc.sh "$@"
+        - '/bin/bash'
+  before_script:
+    - apt update && apt install -y ldap-utils
+    - openssl req -x509 -newkey rsa:4096 -nodes -keyout ldap_keycloak_bridge.key.pem -out ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
+  script:
+    - target/release/printer-ldap --keycloak-address "http://keycloak:8080"  &
+    # Wait for server to start. This is not the cleanest solution, but should be good enough here
+    - sleep 1
+    - LDAPTLS_CACERT=ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
+    - grep 'dc=giz,dc=berlin' ldap_result.txt

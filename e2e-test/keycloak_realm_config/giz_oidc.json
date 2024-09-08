@@ -1,0 +1,70 @@
+{
+  "realm": "giz_oidc",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "ldap_bridge",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "ldap_bridge_secret",
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled" : true
+    }
+  ],
+  "users": [
+    {
+      "username": "TestUser",
+      "email": "tester@test.giz.berlin",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "LDAP",
+      "lastName": "Tester",
+      "groups": ["/TestGroup/SubGroup"],
+      "realmRoles": [
+        "TestRealmRole"
+      ]
+    },
+    {
+      "username": "SecondTestUser",
+      "email": "user@test.giz.berlin",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "LDAP",
+      "lastName": "User",
+      "groups": ["/TestGroup"],
+      "realmRoles": [
+        "SecondTestRealmRole"
+      ]
+    },
+    {
+      "username": "service-account-ldap_bridge",
+      "enabled": true,
+      "serviceAccountClientId": "ldap_bridge",
+      "clientRoles": {
+        "realm-management": ["view-users", "view-realm"]
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "TestRealmRole"
+      },
+      {
+        "name": "SecondTestRealmRole"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "name": "TestGroup",
+      "path": "/TestGroup",
+      "subGroups": [
+        {
+          "name": "SubGroup",
+          "path": "/TestGroup/SubGroup"
+        }
+      ]
+    }
+  ]
+}
