@@ -16,6 +16,7 @@ build:
   needs: []
 
 lint:
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/rustlang/rust:nightly
   stage: test
   script:
     - rustup component add clippy

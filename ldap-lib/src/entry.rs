@@ -127,7 +127,7 @@ impl LdapEntry {
     }
 
     /// Get a key-value pair for an attribute. Ensures to return the key casing specified by the client.
-    fn get_key_value<'a>(&'a self, attribute_name: &'a String) -> Option<(&String, &Vec<String>)> {
+    fn get_key_value<'a>(&'a self, attribute_name: &'a String) -> Option<(&'a String, &'a Vec<String>)> {
         Some((attribute_name, self.get_attribute(attribute_name)?))
     }
 

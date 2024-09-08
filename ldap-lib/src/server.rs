@@ -80,7 +80,9 @@ impl Display for LdapClientSession {
     }
 }
 
-/// Run the LDAP server. This method is meant to be the ONLY method called from the main function
+/// Run the LDAP server.
+///
+/// This method is meant to be the ONLY method called from the main function
 /// of a derived binary. It will handle argument parsing and setup logging, which the derived binary
 /// is expected to NOT do itself.
 pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::KeycloakUserAttributeExtractor>) -> anyhow::Result<()> {

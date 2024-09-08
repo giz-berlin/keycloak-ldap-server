@@ -3,3 +3,5 @@ array_width = 80
 # comment_width = 100
 newline_style = "Unix"
 max_width = 160
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
