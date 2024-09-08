@@ -1,0 +1,32 @@
+image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/rust:1
+
+stages:
+  - build
+  - test
+
+build:
+  stage: build
+  script:
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/printer-ldap
+    expire_in: 1 week
+    when: always
+  needs: []
+
+lint:
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/rustlang/rust:nightly
+  stage: test
+  script:
+    - rustup component add clippy
+    - cargo clippy -- -Dwarnings
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+  needs: []
+
+test:
+  stage: test
+  script:
+    - cargo test
+  needs: []

@@ -1,0 +1,30 @@
+[package]
+name = "giz-ldap-lib"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "~1.0.83"
+clap = "~4.5.4"
+clap-verbosity-flag = "~2.2.0"
+futures-util = { version = "~0.3.30", features = ["sink"] }
+keycloak = "~24.0.301"
+ldap3_proto = "~0.5.0"
+log = "~0.4.21"
+openssl = "~0.10.64"
+regex = "~1.10.4"
+reqwest = "~0.12.4"
+simple_logger = "~5.0.0"
+tokio = { version = "~1.38.0", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
+tokio-openssl = "~0.6.4"
+tokio-util = "~0.7.11"
+uuid = { version = "~1.8.0", features = ["v4"] }
+mockall_double = "~0.3.1"
+itertools = "~0.13.0"
+
+[dev-dependencies]
+mockall = "~0.12.1"
+rstest = "~0.21.0"

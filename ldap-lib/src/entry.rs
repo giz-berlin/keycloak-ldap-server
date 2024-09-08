@@ -1,0 +1,525 @@
+use std::{collections::HashMap, string::ToString};
+
+use itertools::Itertools;
+use ldap3_proto::{proto::LdapSubstringFilter, LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry};
+use regex::Regex;
+
+use crate::proto;
+
+const FILTER_MAX_DEPTH: usize = 5;
+const FILTER_MAX_ELEMENTS: usize = 10;
+
+/// An interface for customizing which attributes of a Keycloak user should be added to the
+/// corresponding LDAP entry.
+// Trait bound in order to pass impls to async functions
+pub trait KeycloakUserAttributeExtractor: Send + Sync {
+    /// Add the desired user attributes to the keycloak entry.
+    fn extract(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
+}
+
+pub(crate) struct LdapEntryBuilder {
+    base_distinguished_name: String,
+    organization_name: String,
+    extractor: Box<dyn KeycloakUserAttributeExtractor>,
+}
+
+impl LdapEntryBuilder {
+    pub fn new(base_distinguished_name: String, organization_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
+        Self {
+            base_distinguished_name,
+            organization_name,
+            extractor,
+        }
+    }
+
+    /// The root-DSE: Provides meta-information on what functionality our server offers.
+    pub fn rootdse(&self) -> LdapEntry {
+        let mut entry = LdapEntry::new("".to_string(), vec!["OpenLDAProotDSE".to_string()], true);
+        entry.set_attribute("namingContexts", vec![self.base_distinguished_name.clone()]);
+        entry.set_attribute("supportedLDAPVersion", vec!["3".to_string()]);
+        // This is really just a dummy schema entry, see Self::subschema.
+        // However, we still provide it, as some client implementations may error (or at least omit
+        // a warning) if it is not present at all.
+        entry.set_attribute("subschemaSubentry", vec!["cn=subschema".to_string()]);
+        entry.set_attribute("vendorName", vec!["giz.berlin".to_string()]);
+        entry.set_attribute("vendorVersion", vec!["LDAP Keycloak Bridge ".to_string() + env!("CARGO_PKG_VERSION")]);
+        // WhoAmI: https://datatracker.ietf.org/doc/html/rfc4532.html#section-2
+        entry.set_attribute("supportedExtension", vec!["1.3.6.1.4.1.4203.1.11.3".to_string()]);
+        entry
+    }
+
+    /// The (dummy) schema specification that our server adheres to.
+    /// [RFC 4512, section 4.2](https://datatracker.ietf.org/doc/html/rfc4512.html#section-4.2)
+    /// says that this SHALL be specified by servers that permit modifications and is only
+    /// RECOMMENDED for servers that do not.
+    /// If we wanted to be fully standard-conform, we would need to list all object classes and
+    /// attributes we support here, following the required syntax.
+    /// As that's really tedious and probably unnecessary for this rather minimal service,
+    /// we don't do that.
+    /// Instead, we just return an empty schema and rely on the clients to hopefully
+    /// use the default schema instead.
+    pub fn subschema(&self) -> LdapEntry {
+        // This type of objectclass appears to be one of the few ones that is not actually
+        // a subclass of top as constructed by Self::new. It still has an objectclass attribute, though,
+        // so that should be fine as well.
+        LdapEntry::new("cn=subschema".to_string(), vec!["subschema".to_string()], false)
+    }
+
+    /// The root of our Directory Information Tree. Every entry is contained in the naming context
+    /// of our organization, meaning it will be a subordinate of this entry.
+    pub fn organization(&self) -> LdapEntry {
+        let mut entry = LdapEntry::new(self.base_distinguished_name.clone(), vec!["organization".to_string()], true);
+        entry.set_attribute("organizationName", vec![self.organization_name.clone()]);
+        entry
+    }
+
+    /// Convert a keycloak user to its corresponding LDAP representation.
+    pub fn build_from_keycloak_user(&self, user: keycloak::types::UserRepresentation) -> Option<LdapEntry> {
+        let user_id = user.id.clone()?;
+        let dn = "cn=".to_owned() + &user_id + "," + &self.base_distinguished_name;
+        let mut entry = LdapEntry::new(
+            dn,
+            vec![
+                "inetOrgPerson".to_string(),
+                "organizationalPerson".to_string(),
+                "person".to_string(),
+            ],
+            false,
+        );
+        // No matter the extractor, the LDAP specification says that we need to have an
+        // attribute matching the identifier used in the dsn
+        entry.set_attribute("cn", vec![user.id.clone()?]);
+        self.extractor.extract(user, &mut entry).ok()?;
+
+        Some(entry)
+    }
+}
+
+/// A data class representing an entry in our directory.
+pub struct LdapEntry {
+    pub dn: String,
+    attributes: HashMap<String, Vec<String>>,
+    has_subordinates: bool,
+}
+
+impl LdapEntry {
+    pub fn new(dn: String, mut class: Vec<String>, has_subordinates: bool) -> Self {
+        let mut entry = LdapEntry {
+            dn,
+            attributes: HashMap::new(),
+            has_subordinates,
+        };
+        class.push("top".to_string()); // Every entry belongs to this class
+        entry.set_attribute("objectClass", class);
+        entry
+    }
+
+    /// Sets an attribute for this entry. As LDAP is case-insensitive regarding attribute names,
+    /// we will convert all attribute names to lower case.
+    pub fn set_attribute(&mut self, name: &str, value: Vec<String>) {
+        self.attributes.insert(name.to_lowercase(), value);
+    }
+
+    /// Gets the value of an attribute. As LDAP is case-insensitive, query for the lowercased version
+    /// of the requested attribute.
+    pub fn get_attribute(&self, name: &str) -> Option<&Vec<String>> {
+        self.attributes.get(name.to_lowercase().as_str())
+    }
+
+    /// Get a key-value pair for an attribute. Ensures to return the key casing specified by the client.
+    fn get_key_value<'a>(&'a self, attribute_name: &'a String) -> Option<(&'a String, &'a Vec<String>)> {
+        Some((attribute_name, self.get_attribute(attribute_name)?))
+    }
+
+    /// The client appears to have searched for this entry. Convert this entry into the data
+    /// format that will be sent over the wire, only including the attributes that the client requested.
+    /// Note that this method will NOT check whether this entry matches the filter specified by the client.
+    pub fn new_search_result(&self, requested_attributes: &[String]) -> LdapSearchResultEntry {
+        let all_requested = requested_attributes.is_empty() ||
+            // We don't have any operational attributes, so this is equivalent
+            requested_attributes.iter().any(|attr| attr == "*" || attr == "+");
+        let target_attributes: Vec<(&String, &Vec<String>)> = if all_requested {
+            self.attributes.iter().collect()
+        } else {
+            requested_attributes.iter().unique().filter_map(|attr| self.get_key_value(attr)).collect()
+        };
+
+        let mut result = LdapSearchResultEntry {
+            dn: self.dn.clone(),
+            attributes: target_attributes
+                .into_iter()
+                .map(|(key, value)| LdapPartialAttribute {
+                    atype: key.to_string(),
+                    vals: value.iter().map(|entry| entry.as_bytes().to_vec()).collect(),
+                })
+                .collect(),
+        };
+
+        // We have this separately because this is not really an attribute of the entry,
+        // but rather metainformation the client may explicitly query.
+        if let Some(attr) = requested_attributes.iter().find(|attr| attr.to_lowercase() == "hassubordinates") {
+            result.attributes.push(LdapPartialAttribute {
+                atype: attr.to_string(), // We ensure to retain the casing specified by the client.
+                vals: vec![self.has_subordinates.to_string().into_bytes()],
+            });
+        }
+
+        result
+    }
+
+    /// Check whether this entry matches the filter the client specified in its search.
+    /// Enforces some limits on how complex that filter is allowed to be.
+    pub fn matches_filter(&self, f: &LdapFilter) -> Result<bool, proto::LdapError> {
+        let mut max_elements = FILTER_MAX_ELEMENTS;
+        self._matches_filter(f, FILTER_MAX_DEPTH, &mut max_elements)
+    }
+
+    fn _matches_filter(&self, f: &LdapFilter, depth: usize, elems: &mut usize) -> Result<bool, proto::LdapError> {
+        let mut new_depth = depth;
+        self.consume_resource(&mut new_depth, 1)?;
+        match f {
+            LdapFilter::And(l) => {
+                self.consume_resource(elems, l.len())?;
+
+                for sub_filter in l.iter() {
+                    let res = self._matches_filter(sub_filter, new_depth, elems)?;
+                    if !res {
+                        return Ok(false);
+                    }
+                }
+
+                Ok(true)
+            }
+            LdapFilter::Or(l) => {
+                self.consume_resource(elems, l.len())?;
+
+                for sub_filter in l.iter() {
+                    let res = self._matches_filter(sub_filter, new_depth, elems)?;
+                    if res {
+                        return Ok(true);
+                    }
+                }
+
+                Ok(false)
+            }
+            LdapFilter::Not(sub_filter) => Ok(!self._matches_filter(sub_filter, new_depth, elems)?),
+            LdapFilter::Equality(a, v) => {
+                if let Some(values) = self.get_attribute(a) {
+                    Ok(values.iter().any(|val| val == v))
+                } else {
+                    // If the attribute does not even exist, we have no match.
+                    Ok(false)
+                }
+            }
+            LdapFilter::Present(a) => Ok(self.get_attribute(a).is_some()),
+            LdapFilter::Substring(a, LdapSubstringFilter { initial, any, final_ }) => {
+                if let Some(values) = self.get_attribute(a) {
+                    // This might not be the most efficient way to do this, but it would have
+                    // been much more tedious to implement it manually with substring searches.
+                    let mut regex = "".to_string();
+                    if let Some(search) = initial {
+                        regex += "^";
+                        regex += &regex::escape(search);
+                        regex += ".*"
+                    }
+                    for search in any {
+                        regex += &regex::escape(search);
+                        regex += ".*"
+                    }
+                    if let Some(search) = final_ {
+                        regex += &regex::escape(search);
+                        regex += "$"
+                    }
+                    // This should not fail, as the search values are fully escaped and the remaining RegEx is valid
+                    let substr_filter = Regex::new(regex.as_str()).unwrap();
+                    Ok(values.iter().any(|value| substr_filter.is_match(value)))
+                } else {
+                    // If the attribute does not even exist, we have no match.
+                    Ok(false)
+                }
+            }
+            _ => {
+                log::error!("Unsupported filter operation");
+                Err(proto::LdapError(LdapResultCode::UnwillingToPerform, "Operation not implemented".to_string()))
+            }
+        }
+    }
+
+    fn consume_resource(&self, resource: &mut usize, consumption_amount: usize) -> Result<(), proto::LdapError> {
+        *resource = resource
+            .checked_sub(consumption_amount)
+            .ok_or(proto::LdapError(LdapResultCode::UnwillingToPerform, "Filter too expensive".to_string()))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use keycloak::types::UserRepresentation;
+    use rstest::*;
+
+    use super::*;
+
+    mod when_creating_search_result {
+        use super::*;
+
+        const DUMMY_DN: &str = "dummy_dn";
+        const DUMMY_CLASS: &str = "dummy_class";
+
+        #[fixture]
+        fn entry_with_some_attributes() -> LdapEntry {
+            let mut entry = LdapEntry::new(DUMMY_DN.to_string(), vec![DUMMY_CLASS.to_string()], true);
+            entry.set_attribute("abc", vec!["abc".to_string()]);
+            entry.set_attribute("def", vec!["def".to_string()]);
+            entry.set_attribute("ghi", vec!["ghi".to_string()]);
+            entry
+        }
+
+        #[rstest]
+        fn then_return_dn(entry_with_some_attributes: LdapEntry) {
+            // when & then
+            assert_eq!(DUMMY_DN, entry_with_some_attributes.new_search_result(&[]).dn)
+        }
+
+        #[rstest]
+        fn then_return_correct_object_class(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["objectClass".to_string()]);
+
+            // then
+            let classes: Vec<&str> = result.attributes.get(0).unwrap().vals.iter().map(|c| std::str::from_utf8(c).unwrap()).collect();
+            assert_eq!(2, classes.len());
+            assert_eq!(&DUMMY_CLASS, classes.get(0).unwrap());
+            assert_eq!(&"top", classes.get(1).unwrap());
+        }
+
+        #[rstest]
+        fn then_return_all_attributes_when_no_filter(entry_with_some_attributes: LdapEntry) {
+            // when & then
+            assert_eq!(1 + 3, entry_with_some_attributes.new_search_result(&[]).attributes.len())
+        }
+
+        #[rstest]
+        fn then_return_all_attributes_on_special_selectors(entry_with_some_attributes: LdapEntry) {
+            // when & then
+            assert_eq!(1 + 3, entry_with_some_attributes.new_search_result(&["*".to_string()]).attributes.len());
+            assert_eq!(1 + 3, entry_with_some_attributes.new_search_result(&["+".to_string()]).attributes.len());
+        }
+
+        #[rstest]
+        fn then_return_only_requested_attributes(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["abc".to_string(), "ghi".to_string()]);
+
+            // then
+            assert_eq!(2, result.attributes.len());
+            assert_eq!("abc", result.attributes.get(0).unwrap().atype);
+            assert_eq!("ghi", result.attributes.get(1).unwrap().atype);
+        }
+
+        #[rstest]
+        fn then_do_not_return_attribute_twice(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["abc".to_string(), "abc".to_string()]);
+
+            // when & then
+            assert_eq!(1, result.attributes.len());
+        }
+
+        #[rstest]
+        fn then_ignore_requested_empty_attribute(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["".to_string()]);
+
+            // when & then
+            assert_eq!(0, result.attributes.len());
+        }
+
+        #[rstest]
+        fn then_ignore_non_existent_attribute(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["non-existent-attribute".to_string()]);
+
+            // when & then
+            assert_eq!(0, result.attributes.len());
+        }
+
+        #[rstest]
+        fn then_return_attribute_cased_as_requested(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["aBc".to_string(), "DEf".to_string(), "GhI".to_string()]);
+
+            // when & then
+            assert_eq!(3, result.attributes.len());
+            assert_eq!("aBc", result.attributes.get(0).unwrap().atype);
+            assert_eq!("DEf", result.attributes.get(1).unwrap().atype);
+            assert_eq!("GhI", result.attributes.get(2).unwrap().atype);
+        }
+
+        #[rstest]
+        fn then_add_subordinates_info_when_explicitly_requested(entry_with_some_attributes: LdapEntry) {
+            // when
+            let result = entry_with_some_attributes.new_search_result(&["hasSubordinates".to_string()]);
+
+            // then
+            assert_eq!("hasSubordinates", result.attributes.get(0).unwrap().atype);
+            let has_subordinates_str = std::str::from_utf8(result.attributes.get(0).unwrap().vals.get(0).unwrap()).unwrap();
+            assert_eq!("true", has_subordinates_str);
+        }
+    }
+
+    mod when_filtering {
+        use ldap3_proto::{proto::LdapMatchingRuleAssertion, LdapFilter};
+
+        use super::*;
+
+        #[fixture]
+        fn dummy_entry() -> LdapEntry {
+            LdapEntry::new("".to_string(), Vec::new(), false)
+        }
+
+        fn matching_filter() -> LdapFilter {
+            LdapFilter::Present("objectclass".to_string())
+        }
+
+        fn non_matching_filter() -> LdapFilter {
+            LdapFilter::Not(Box::new(matching_filter()))
+        }
+
+        #[rstest]
+        fn then_and_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::And(vec![matching_filter(), matching_filter(), matching_filter()]))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::And(vec![matching_filter(), non_matching_filter(), matching_filter()]))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_or_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), non_matching_filter()]))
+                .unwrap());
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), matching_filter()]))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_not_filter_works_correctly(dummy_entry: LdapEntry) {
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::Not(Box::new(non_matching_filter()))).unwrap());
+            assert!(!dummy_entry.matches_filter(&LdapFilter::Not(Box::new(matching_filter()))).unwrap());
+        }
+
+        #[rstest]
+        #[case("*", true)]
+        #[case("very*", true)]
+        #[case("*long*", true)]
+        #[case("long*", false)]
+        #[case("*long", false)]
+        #[case("v*long*l*e", true)]
+        fn then_substring_filter_works_correctly(mut dummy_entry: LdapEntry, #[case] filter_string: String, #[case] should_match: bool) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["very_long_value".to_string()]);
+
+            // when & then
+            assert_eq!(
+                should_match,
+                dummy_entry
+                    .matches_filter(&LdapFilter::Substring("attr".to_string(), LdapSubstringFilter::from(filter_string)))
+                    .unwrap()
+            )
+        }
+
+        #[rstest]
+        fn then_present_filter_works_correctly(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["value".to_string()]);
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::Present("attr".to_string())).unwrap());
+            assert!(!dummy_entry.matches_filter(&LdapFilter::Present("other_attr".to_string())).unwrap());
+        }
+
+        #[rstest]
+        fn then_equality_filter_works_correctly(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attr", vec!["value".to_string()]);
+
+            // when & then
+            assert!(dummy_entry
+                .matches_filter(&LdapFilter::Equality("attr".to_string(), "value".to_string()))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Equality("attr".to_string(), "other_value".to_string()))
+                .unwrap());
+            assert!(!dummy_entry
+                .matches_filter(&LdapFilter::Equality("other_attr".to_string(), "value".to_string()))
+                .unwrap());
+        }
+
+        #[rstest]
+        fn then_match_case_insensitive(mut dummy_entry: LdapEntry) {
+            // given
+            dummy_entry.set_attribute("attribute", vec!["value".to_string()]);
+
+            let filter = LdapFilter::Present("AttRIbUTe".to_string());
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).unwrap())
+        }
+
+        #[rstest]
+        #[case::le(LdapFilter::LessOrEqual("".to_string(), "".to_string()))]
+        #[case::ge(LdapFilter::GreaterOrEqual("".to_string(), "".to_string()))]
+        #[case::approx(LdapFilter::Approx("".to_string(), "".to_string()))]
+        #[case::extensible(LdapFilter::Extensible(LdapMatchingRuleAssertion{..Default::default()}))]
+        fn then_reject_unsupported_filter(dummy_entry: LdapEntry, #[case] filter: LdapFilter) {
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).is_err())
+        }
+
+        #[rstest]
+        fn then_forbid_too_many_filter_elements(dummy_entry: LdapEntry) {
+            // given
+            let mut sub_filters = Vec::new();
+            for _ in 0..FILTER_MAX_ELEMENTS + 1 {
+                sub_filters.push(matching_filter());
+            }
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&LdapFilter::And(sub_filters.clone())).is_err());
+            assert!(dummy_entry.matches_filter(&LdapFilter::Or(sub_filters)).is_err());
+        }
+
+        #[rstest]
+        #[case::not(|f| LdapFilter::Not(Box::new(f)))]
+        #[case::and(|f| LdapFilter::And(vec![f]))]
+        #[case::or(|f| LdapFilter::Or(vec![f]))]
+        fn then_forbid_too_deep_nesting<F>(dummy_entry: LdapEntry, #[case] mk_filter: F)
+        where
+            F: Fn(LdapFilter) -> LdapFilter,
+        {
+            // given
+            let mut filter = matching_filter();
+            for _ in 0..FILTER_MAX_DEPTH + 1 {
+                filter = mk_filter(filter);
+            }
+
+            // when & then
+            assert!(dummy_entry.matches_filter(&filter).is_err())
+        }
+    }
+
+    pub struct DummyExtractor;
+
+    impl KeycloakUserAttributeExtractor for DummyExtractor {
+        fn extract(&self, _user: UserRepresentation, _ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+}
