@@ -161,7 +161,7 @@ impl LdapHandler {
                 let group_associated_users = bound_user
                     .keycloak_service_account
                     .query_users_in_group(
-                        // We can unwrap here because we made sure to filter out groups without a id
+                        // We can unwrap here because query_named_groups only returns groups with an ID
                         group.id.as_ref().unwrap(),
                     )
                     .await?;
@@ -304,6 +304,7 @@ mod tests {
         use super::*;
 
         const DEFAULT_USER_ID: &str = "s0m3-us3r";
+        const DEFAULT_GROUP_ID: &'static str = "group_id";
 
         fn search_request(base: &str, scope: LdapSearchScope, filter: Option<LdapFilter>) -> ServerOps {
             ServerOps::Search(SearchRequest {
@@ -314,6 +315,7 @@ mod tests {
                 attrs: vec![
                     "objectclass".to_string(),
                     "cn".to_string(),
+                    "ou".to_string(),
                     "uniqueMember".to_string(),
                     "memberOf".to_string(),
                 ],
@@ -489,7 +491,7 @@ mod tests {
             #[tokio::test]
             async fn then_do_not_return_groups(ldap_handler: LdapHandler) {
                 // given
-                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![("group-id", vec![0])]);
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![(DEFAULT_GROUP_ID, vec![0])]);
 
                 // when
                 let search_request = search_request(DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children, None);
@@ -512,8 +514,6 @@ mod tests {
                 handler
             }
 
-            const DEFAULT_GROUP_ID: &'static str = "group_id";
-
             #[rstest]
             #[tokio::test]
             async fn then_do_return_groups(ldap_handler: LdapHandler) {
@@ -531,7 +531,7 @@ mod tests {
                 let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
 
                 // then
-                assert_search_result_contains_exactly_entries_satisfying!(search_result, LdapResultCode::Success, DEFAULT_GROUP_ID);
+                assert_search_result_contains_exactly_entries_satisfying!(search_result, LdapResultCode::Success, "ou" => DEFAULT_GROUP_ID);
             }
 
             #[rstest]

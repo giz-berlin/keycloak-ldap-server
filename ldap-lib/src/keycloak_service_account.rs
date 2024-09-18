@@ -48,40 +48,40 @@ mod client {
         target_realm: String,
     }
 
-    macro_rules! error_convert_and_filter {
-        ($resource_name:literal, $keycloak_api_call:expr) => {
-            error_convert_and_filter!($resource_name, $keycloak_api_call, |_| true)
-        };
-        ($resource_name:literal, $keycloak_api_call:expr, $filter:expr) => {
-            match $keycloak_api_call {
-                Ok(resource) => Ok(resource.into_iter().filter($filter).collect()),
-                Err(keycloak::KeycloakError::ReqwestFailure(_)) => {
-                    return Err(proto::LdapError(
-                        LdapResultCode::Unavailable,
-                        "Could not connect to keycloak.".to_string(),
-                    ))
-                }
-                Err(e) => {
-                    log::error!("Could not fetch {} from keycloak: {:?}", $resource_name, e);
-                    return Err(proto::LdapError(
-                        LdapResultCode::Other,
-                        format!("Could not load {} information from keycloak", $resource_name),
-                    ));
-                }
-            }
-        };
-    }
-
-    #[cfg_attr(test, mockall::automock)]
     impl ServiceAccountClient {
         pub fn new(client: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>, target_realm: String) -> Self {
             Self { client, target_realm }
         }
 
+        /// Convert a keycloakError into an appropriate LdapError.
+        /// Also use the provided filter function to remove unwanted results from the resource data.
+        fn error_convert_and_filter<Resource, Filter>(
+            resource_name: &str,
+            data: Result<Vec<Resource>, keycloak::KeycloakError>,
+            filter: Filter,
+        ) -> Result<Vec<Resource>, proto::LdapError>
+        where
+            Filter: Fn(&Resource) -> bool,
+        {
+            match data {
+                Ok(resource) => Ok(resource.into_iter().filter(filter).collect()),
+                Err(keycloak::KeycloakError::ReqwestFailure(_)) => {
+                    Err(proto::LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak.".to_string()))
+                }
+                Err(e) => {
+                    log::error!("Could not fetch {} from keycloak: {:?}", resource_name, e);
+                    Err(proto::LdapError(
+                        LdapResultCode::Other,
+                        format!("Could not fetch {} from keycloak", resource_name),
+                    ))
+                }
+            }
+        }
+
         /// Query users of realm we configured for this client. Will not perform any pagination,
         /// so make sure the size_limit you pass is high enough to allow for all users to be returned.
         pub async fn query_users(&self, size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            error_convert_and_filter!(
+            ServiceAccountClient::error_convert_and_filter(
                 "users",
                 self.client
                     .realm_users_get(
@@ -101,28 +101,30 @@ mod client {
                         None,
                         None,
                     )
-                    .await
+                    .await,
+                |_| true, // unconditionally retain all users
             )
         }
 
         /// Query all groups in realm we configured for this client, disregarding groups that do not have an id or a name.
         pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
-            error_convert_and_filter!(
+            ServiceAccountClient::error_convert_and_filter(
                 "groups",
                 self.client
                     .realm_groups_get(&self.target_realm, Some(false), None, None, None, Some(true), None, None)
                     .await,
-                |group| group.id.is_some() && group.name.is_some()
+                |group| group.id.is_some() && group.name.is_some(),
             )
         }
 
         /// Query users belonging to a group.
         pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            error_convert_and_filter!(
+            ServiceAccountClient::error_convert_and_filter(
                 "users_in_group",
                 self.client
                     .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, None)
-                    .await
+                    .await,
+                |_| true, // unconditionally retain all users
             )
         }
     }
@@ -243,9 +245,15 @@ mod client {
             Ok(self
                 .groups
                 .iter()
-                .map(|(group_name, _)| keycloak::types::GroupRepresentation {
-                    id: Some(group_name.to_string()),
-                    name: Some(group_name.to_string()),
+                .map(|(group_id, _)| keycloak::types::GroupRepresentation {
+                    id: Some(group_id.to_string()),
+                    // In order for our tests to be able to check that ID and name are properly handled
+                    // separately, they should have different values. However, we don't want to bother
+                    // manually having to assign both each time, so we just make them follow this
+                    // hard-coded pattern.
+                    // This way, the values are not exactly independant, but not identical, which should
+                    // be good enough.
+                    name: Some(group_id.to_string() + "_NAME"),
                     ..Default::default()
                 })
                 .collect())
