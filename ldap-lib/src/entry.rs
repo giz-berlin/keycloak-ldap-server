@@ -100,8 +100,12 @@ impl LdapEntryBuilder {
     }
 
     /// The DN of a group in our LDAP tree.
-    pub fn group_dn(&self, group_id: &str) -> String {
-        "ou=".to_owned() + group_id + "," + &self.base_distinguished_name
+    pub fn group_dn(&self, group_id: &str, parent_group_dn: Option<&str>) -> String {
+        if let Some(parent_dn) = parent_group_dn {
+            "ou=".to_owned() + group_id + "," + parent_dn
+        } else {
+            "ou=".to_owned() + group_id + "," + &self.base_distinguished_name
+        }
     }
 
     /// Convert a keycloak group and the associated users into a corresponding LDAP group.
@@ -113,10 +117,11 @@ impl LdapEntryBuilder {
     pub fn build_from_keycloak_group_with_associated_users(
         &self,
         group: keycloak::types::GroupRepresentation,
+        parent_group_dn: Option<&str>,
         known_users: &mut HashMap<String, LdapEntry>,
         all_group_associated_users: &[keycloak::types::UserRepresentation],
     ) -> LdapEntry {
-        let mut entry = LdapEntry::new(self.group_dn(group.id.as_ref().unwrap()), vec![PRIMARY_GROUP_OBJECT_CLASS.to_string()]);
+        let mut entry = LdapEntry::new(self.group_dn(group.id.as_ref().unwrap(), parent_group_dn), vec![PRIMARY_GROUP_OBJECT_CLASS.to_string()]);
         entry.set_attribute("cn", vec![group.name.clone().unwrap()]);
         entry.set_attribute("ou", vec![group.id.unwrap()]);
 

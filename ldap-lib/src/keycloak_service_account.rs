@@ -78,6 +78,11 @@ mod client {
             }
         }
 
+        /// Unconditionally retain the resource entry.
+        fn retain_everything<Resource>(_: &Resource) -> bool {
+            true
+        }
+
         /// Query users of realm we configured for this client. Will not perform any pagination,
         /// so make sure the size_limit you pass is high enough to allow for all users to be returned.
         pub async fn query_users(&self, size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
@@ -102,7 +107,7 @@ mod client {
                         None,
                     )
                     .await,
-                |_| true, // unconditionally retain all users
+                ServiceAccountClient::retain_everything,
             )
         }
 
@@ -117,6 +122,17 @@ mod client {
             )
         }
 
+        /// Query subgroups for a group.
+        pub async fn query_sub_groups(&self, group_id: &str) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
+            ServiceAccountClient::error_convert_and_filter(
+                "sub_groups",
+                self.client
+                    .realm_groups_with_group_id_children_get(&self.target_realm, group_id, Some(true), None, None, None, None)
+                    .await,
+                ServiceAccountClient::retain_everything,
+            )
+        }
+
         /// Query users belonging to a group.
         pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             ServiceAccountClient::error_convert_and_filter(
@@ -124,7 +140,7 @@ mod client {
                 self.client
                     .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, None)
                     .await,
-                |_| true, // unconditionally retain all users
+                ServiceAccountClient::retain_everything,
             )
         }
     }

@@ -227,18 +227,8 @@ impl KeycloakClientLdapCache {
         if self.configuration.include_group_info {
             let groups: Vec<keycloak::types::GroupRepresentation> = self.service_account_client.query_named_groups().await?;
             for group in groups.into_iter() {
-                let group_associated_users = self
-                    .service_account_client
-                    .query_users_in_group(
-                        // We can unwrap here because we made sure to filter out groups without a id
-                        group.id.as_ref().unwrap(),
-                    )
-                    .await?;
-                let ldap_group =
-                    self.configuration
-                        .ldap_entry_builder
-                        .build_from_keycloak_group_with_associated_users(group, &mut users, &group_associated_users);
-                organization.add_subordinate(ldap_group);
+                let group_entry = self.fetch_group(group, None, &mut users).await?;
+                organization.add_subordinate(group_entry);
             }
         }
         users.into_values().for_each(|user| {
@@ -249,6 +239,33 @@ impl KeycloakClientLdapCache {
         // Crucial: We only acquire a lock now in order to not block querying requests while we update the data
         *self.root.write().await = root;
         Ok(())
+    }
+
+    #[async_recursion::async_recursion]
+    async fn fetch_group(&self, group: keycloak::types::GroupRepresentation, parent_group_dn: Option<&str>, users: &mut std::collections::HashMap<String, entry::LdapEntry>) -> Result<entry::LdapEntry, proto::LdapError> {
+        // We can unwrap here because we made sure to filter out groups without a id
+        let group_id = group.id.as_ref().unwrap();
+        let group_associated_users = self
+            .service_account_client
+            .query_users_in_group(group_id)
+            .await?;
+
+        let subgroup_count = if let Some(count) = group.sub_group_count { count } else { 0 };
+        let sub_groups = if subgroup_count > 0 {
+            self.service_account_client.query_sub_groups(group_id).await?
+        } else { vec![] };
+
+        let mut ldap_group =
+            self.configuration
+                .ldap_entry_builder
+                .build_from_keycloak_group_with_associated_users(group, parent_group_dn, users, &group_associated_users);
+
+        for sub_group in sub_groups.into_iter() {
+            let ldap_sub_group = self.fetch_group(sub_group, Some(&ldap_group.dn), users).await?;
+            ldap_group.add_subordinate(ldap_sub_group);
+        }
+
+        Ok(ldap_group)
     }
 
     /// Launch a new task responsible for periodically syncing the cache data from keycloak.
