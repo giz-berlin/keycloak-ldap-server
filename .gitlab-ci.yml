@@ -16,11 +16,16 @@ build:
   needs: []
 
 lint:
-  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/rustlang/rust:nightly
   stage: test
   script:
     - rustup component add clippy
-    - cargo clippy -- -Dwarnings
+    - cargo clippy --no-deps -- -Dwarnings
+  needs: []
+
+fmt-check:
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/rustlang/rust:nightly
+  stage: test
+  script:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
   needs: []
