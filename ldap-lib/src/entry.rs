@@ -9,6 +9,9 @@ use crate::proto;
 const FILTER_MAX_DEPTH: usize = 5;
 const FILTER_MAX_ELEMENTS: usize = 10;
 
+pub const PRIMARY_USER_OBJECT_CLASS: &str = "inetOrgPerson";
+pub const PRIMARY_GROUP_OBJECT_CLASS: &str = "groupOfUniqueNames";
+
 /// An interface for customizing which attributes of a Keycloak user should be added to the
 /// corresponding LDAP entry.
 // Trait bound in order to pass impls to async functions
@@ -83,7 +86,7 @@ impl LdapEntryBuilder {
         let mut entry = LdapEntry::new(
             self.user_dn(user.id.as_ref()?),
             vec![
-                "inetOrgPerson".to_string(),
+                PRIMARY_USER_OBJECT_CLASS.to_string(),
                 "organizationalPerson".to_string(),
                 "person".to_string(),
             ],
@@ -113,7 +116,7 @@ impl LdapEntryBuilder {
         known_users: &mut HashMap<String, LdapEntry>,
         all_group_associated_users: &[keycloak::types::UserRepresentation],
     ) -> LdapEntry {
-        let mut entry = LdapEntry::new(self.group_dn(group.id.as_ref().unwrap()), vec!["groupOfUniqueNames".to_string()]);
+        let mut entry = LdapEntry::new(self.group_dn(group.id.as_ref().unwrap()), vec![PRIMARY_GROUP_OBJECT_CLASS.to_string()]);
         entry.set_attribute("cn", vec![group.name.clone().unwrap()]);
         entry.set_attribute("ou", vec![group.id.unwrap()]);
 

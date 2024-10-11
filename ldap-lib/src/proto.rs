@@ -536,6 +536,47 @@ mod tests {
 
             #[rstest]
             #[tokio::test]
+            async fn by_group_objectclass__then_only_return_groups(ldap_handler: LdapHandler) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![(DEFAULT_GROUP_ID, vec![0])]);
+
+                // when
+                let search_request = search_request(
+                    DEFAULT_BASE_DISTINGUISHED_NAME,
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Equality("objectClass".to_string(), entry::PRIMARY_GROUP_OBJECT_CLASS.to_string())),
+                );
+                let client_session = client_session(true, &ldap_handler).await;
+
+                let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+                // then
+                assert_search_result_contains_exactly_entries_satisfying!(search_result, LdapResultCode::Success, "ou" => DEFAULT_GROUP_ID);
+            }
+
+            /// Note that testing for this only really makes sense here with group support enabled, because otherwise, all LDAP nodes are of type user.
+            #[rstest]
+            #[tokio::test]
+            async fn by_user_objectclass__then_only_return_users(ldap_handler: LdapHandler) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(vec![DEFAULT_USER_ID], vec![(DEFAULT_GROUP_ID, vec![0])]);
+
+                // when
+                let search_request = search_request(
+                    DEFAULT_BASE_DISTINGUISHED_NAME,
+                    LdapSearchScope::Children,
+                    Some(LdapFilter::Equality("objectClass".to_string(), entry::PRIMARY_USER_OBJECT_CLASS.to_string())),
+                );
+                let client_session = client_session(true, &ldap_handler).await;
+
+                let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+                // then
+                assert_search_result_contains_exactly_entries_satisfying!(search_result, LdapResultCode::Success, DEFAULT_USER_ID);
+            }
+
+            #[rstest]
+            #[tokio::test]
             async fn then_assign_users_to_groups(ldap_handler: LdapHandler, entry_builder: entry::LdapEntryBuilder) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
