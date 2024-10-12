@@ -70,7 +70,11 @@ struct CliArguments {
     )]
     session_first_answer_delay_millis: u64,
 
-    #[clap(long, default_value = "30", help = "How often to update entries in the LDAP cache.")]
+    #[clap(
+        long,
+        default_value = "30",
+        help = "How often to update entries in the LDAP cache. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!"
+    )]
     cache_update_interval_secs: u64,
 
     #[clap(
@@ -138,14 +142,15 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let handler = Arc::from(proto::LdapHandler::new(cache::LdapTreeCache::new(
+    let cache_registry = Arc::new(cache::CacheRegistry::new(
         keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
         args.num_users,
         include_group_info,
         time::Duration::from_secs(args.cache_update_interval_secs),
         time::Duration::from_secs(args.cache_entry_max_inactive_secs),
         entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
-    )));
+    ));
+    let handler = Arc::from(proto::LdapHandler::new(cache_registry));
 
     loop {
         match listener.accept().await {
