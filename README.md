@@ -36,11 +36,14 @@ As the LDAP library will handle argument parsing and logging, your main function
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let include_group_info = true;
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info).await
+    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info, flatten_group_hierarchy).await
 }
 ```
 
 See [the printer-specific implementation](printer-ldap) for an example.
+
+NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`), 
+this service REPLACES all `/` characters in a group name with `_`.
 
 In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
 
