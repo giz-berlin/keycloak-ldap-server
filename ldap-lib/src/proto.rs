@@ -136,6 +136,7 @@ pub mod tests {
     async fn cache_registry(
         #[default(true)] register_default_client: bool,
         #[default(false)] include_group_info: bool,
+        #[default(false)] flatten_group_hierarchy: bool,
         ldap_entry_builder: entry::LdapEntryBuilder,
     ) -> Arc<cache::CacheRegistry> {
         let cache = cache::CacheRegistry::new(
@@ -143,6 +144,7 @@ pub mod tests {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
                 num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
                 include_group_info,
+                flatten_group_hierarchy,
                 cache_update_interval: Duration::from_secs(30),
                 max_entry_inactive_time: Duration::from_secs(60 * 60),
                 ldap_entry_builder,
@@ -269,6 +271,7 @@ pub mod tests {
 
     mod when_search {
         use ldap3_proto::{proto::LdapResult, LdapFilter, LdapSearchScope};
+        use keycloak_service_account::client::TestGroup;
 
         use super::*;
 
@@ -495,7 +498,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -523,7 +526,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -551,7 +554,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -580,7 +583,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -610,8 +613,8 @@ pub mod tests {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID, test_constants::ANOTHER_USER_ID],
                     vec![
-                        (test_constants::DEFAULT_GROUP_ID, vec![0]),
-                        (test_constants::ANOTHER_GROUP_ID, vec![1]),
+                        TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0]),
+                        TestGroup::new(test_constants::ANOTHER_GROUP_ID, vec![1]),
                     ],
                 );
                 let client_session = client_session(true);
@@ -646,8 +649,8 @@ pub mod tests {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID, test_constants::ANOTHER_USER_ID],
                     vec![
-                        (test_constants::DEFAULT_GROUP_ID, vec![0]),
-                        (test_constants::ANOTHER_GROUP_ID, vec![1]),
+                        TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0]),
+                        TestGroup::new(test_constants::ANOTHER_GROUP_ID, vec![1]),
                     ],
                 );
                 let client_session = client_session(true);

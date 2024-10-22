@@ -153,22 +153,75 @@ mod client {
 }
 
 #[cfg(test)]
-mod client {
-    use std::{
-        collections::HashMap,
-        sync::{Mutex, MutexGuard},
-    };
+pub mod client {
+    use std::sync::{Mutex, MutexGuard};
 
     use ldap3_proto::LdapResultCode;
 
     use super::*;
+
+    #[derive(Debug, Default)]
+    pub struct TestGroup {
+        pub id: &'static str,
+        pub users: Vec<usize>,
+        pub sub_groups: Vec<Self>,
+    }
+
+    impl TestGroup {
+        pub fn new(id: &'static str, users: Vec<usize>) -> Self {
+            Self {
+                id,
+                users,
+                sub_groups: Vec::new(),
+            }
+        }
+
+        pub fn with_subgroups(id: &'static str, sub_groups: Vec<Self>) -> Self {
+            Self {
+                id,
+                users: Vec::new(),
+                sub_groups,
+            }
+        }
+
+        pub fn group_name(group_id: &'static str) -> String {
+            group_id.to_string() + "_NAME"
+        }
+
+        pub fn to_keycloak_representation(&self) -> keycloak::types::GroupRepresentation {
+            keycloak::types::GroupRepresentation {
+                id: Some(self.id.to_string()),
+                // In order for our tests to be able to check that ID and name are properly handled
+                // separately, they should have different values. However, we don't want to bother
+                // manually having to assign both each time, so we just make them follow this
+                // hard-coded pattern.
+                // This way, the values are not exactly independant, but not identical, which should
+                // be good enough.
+                name: Some(Self::group_name(self.id)),
+                sub_group_count: Some(self.sub_groups.len() as i64),
+                ..Default::default()
+            }
+        }
+
+        fn search_group(&self, group_id: &str) -> Result<&Self, proto::LdapError> {
+            if group_id == self.id {
+                return Ok(self);
+            }
+            for group in self.sub_groups.iter() {
+                if let Ok(res) = group.search_group(group_id) {
+                    return Ok(res);
+                }
+            }
+            Err(proto::LdapError(LdapResultCode::NoSuchObject, "Could not find group with ID".to_string()))
+        }
+    }
 
     /// A mock for our service account client. Used to test that our library deals with the information provided by keycloak directly
     /// without having to have an actual keycloak instance running.
     #[derive(Debug)]
     pub struct MockServiceAccountClient {
         pub user_ids: Vec<&'static str>,
-        pub groups: HashMap<&'static str, Vec<usize>>,
+        pub root_group: TestGroup,
         pub err_code: Mutex<Option<LdapResultCode>>,
         pub call_count: Mutex<u64>,
     }
@@ -206,7 +259,7 @@ mod client {
         pub fn set_empty() -> MutexGuard<'static, ()> {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids: vec![],
-                groups: HashMap::new(),
+                root_group: TestGroup::default(),
                 err_code: Mutex::new(None),
                 call_count: Mutex::new(0),
             })
@@ -215,16 +268,16 @@ mod client {
         pub fn set_users(user_ids: Vec<&'static str>) -> MutexGuard<'static, ()> {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids,
-                groups: HashMap::new(),
+                root_group: TestGroup::default(),
                 err_code: Mutex::new(None),
                 call_count: Mutex::new(0),
             })
         }
 
-        pub fn set_users_groups(user_ids: Vec<&'static str>, groups: Vec<(&'static str, Vec<usize>)>) -> MutexGuard<'static, ()> {
+        pub fn set_users_groups(user_ids: Vec<&'static str>, groups: Vec<TestGroup>) -> MutexGuard<'static, ()> {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids,
-                groups: groups.into_iter().collect(),
+                root_group: TestGroup::with_subgroups("", groups),
                 err_code: Mutex::new(None),
                 call_count: Mutex::new(0),
             })
@@ -233,7 +286,7 @@ mod client {
         pub fn set_err(err_code: LdapResultCode) -> MutexGuard<'static, ()> {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids: vec![],
-                groups: HashMap::new(),
+                root_group: TestGroup::default(),
                 err_code: Mutex::new(Some(err_code)),
                 call_count: Mutex::new(0),
             })
@@ -279,20 +332,21 @@ mod client {
             }
 
             *lock_ignoring_poison!(self.call_count) += 1;
+            Ok(self.root_group.sub_groups.iter().map(TestGroup::to_keycloak_representation).collect())
+        }
+
+        pub async fn query_sub_groups(&self, group_id: &str) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
+            if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
+                return Err(proto::LdapError(err_code.clone(), "".to_string()));
+            }
+            *lock_ignoring_poison!(self.call_count) += 1;
+
             Ok(self
-                .groups
+                .root_group
+                .search_group(group_id)?
+                .sub_groups
                 .iter()
-                .map(|(group_id, _)| keycloak::types::GroupRepresentation {
-                    id: Some(group_id.to_string()),
-                    // In order for our tests to be able to check that ID and name are properly handled
-                    // separately, they should have different values. However, we don't want to bother
-                    // manually having to assign both each time, so we just make them follow this
-                    // hard-coded pattern.
-                    // This way, the values are not exactly independant, but not identical, which should
-                    // be good enough.
-                    name: Some(group_id.to_string() + "_NAME"),
-                    ..Default::default()
-                })
+                .map(TestGroup::to_keycloak_representation)
                 .collect())
         }
 
@@ -303,9 +357,9 @@ mod client {
 
             *lock_ignoring_poison!(self.call_count) += 1;
             Ok(self
-                .groups
-                .get(group_id)
-                .unwrap()
+                .root_group
+                .search_group(group_id)?
+                .users
                 .iter()
                 .map(|&user_index| keycloak::types::UserRepresentation {
                     id: Some(self.user_ids.get(user_index).unwrap().to_string()),

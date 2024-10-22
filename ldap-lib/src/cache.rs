@@ -271,7 +271,7 @@ impl KeycloakClientLdapCache {
             &group_associated_users,
         );
 
-        let mut subgroups_on_same_hierarchy_level = vec![];
+        let mut subgroups_on_same_hierarchy_level = Vec::new();
         for sub_group in sub_groups.into_iter() {
             let (ldap_sub_group, mut sub_sub_groups_same_hierarchy_level) = self.fetch_group(sub_group, Some(&ldap_group), users).await?;
             if self.configuration.flatten_group_hierarchy {
@@ -368,12 +368,13 @@ mod test {
     const MAX_ENTRY_INACTIVE_TIME: Duration = Duration::from_secs(60);
 
     #[fixture]
-    fn registry(#[default(false)] include_group_info: bool) -> Arc<CacheRegistry> {
+    fn registry(#[default(false)] include_group_info: bool, #[default(false)] flatten_group_hierarchy: bool) -> Arc<CacheRegistry> {
         CacheRegistry::new(
             CacheConfiguration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
                 num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
                 include_group_info,
+                flatten_group_hierarchy,
                 cache_update_interval: CACHE_UPDATE_INTERVAL,
                 max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,
                 ldap_entry_builder: proto::tests::ldap_entry_builder(),
