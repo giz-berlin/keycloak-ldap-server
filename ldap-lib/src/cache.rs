@@ -4,77 +4,128 @@ use ldap3_proto::{LdapResultCode, LdapSearchResultEntry, SearchRequest};
 
 use crate::{entry, keycloak_service_account, proto};
 
-/// A thread-safe registry registry keeping track of and allowing access to all active client caches.
-/// Will also provide configuration info applicable to all client caches.
-pub struct CacheRegistry {
+/// Data class holding cache configuration values.
+pub struct CacheConfiguration {
     pub keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder,
     pub num_users_to_fetch: i32,
     pub include_group_info: bool,
     pub cache_update_interval: time::Duration,
     pub max_entry_inactive_time: time::Duration,
     pub ldap_entry_builder: entry::LdapEntryBuilder,
+}
+
+const REGISTRY_HOUSEKEEPING_INTERVAL: time::Duration = time::Duration::from_secs(5);
+
+/// A thread-safe registry keeping track of and allowing access to all active client caches.
+/// Will periodically evict inactive caches.
+pub struct CacheRegistry {
+    configuration: Arc<CacheConfiguration>,
     per_client_ldap_trees: tokio::sync::RwLock<std::collections::HashMap<String, Arc<KeycloakClientLdapCache>>>,
 }
 
 impl CacheRegistry {
-    pub fn new(
-        service_account_builder: keycloak_service_account::ServiceAccountClientBuilder,
-        num_users_to_fetch: i32,
-        include_group_info: bool,
-        cache_update_interval: time::Duration,
-        max_entry_inactive_time: time::Duration,
-        entry_builder: entry::LdapEntryBuilder,
-    ) -> Self {
-        Self {
-            keycloak_service_account_client_builder: service_account_builder,
-            num_users_to_fetch,
-            include_group_info,
-            cache_update_interval,
-            max_entry_inactive_time,
-            ldap_entry_builder: entry_builder,
+    /// Create a new registry and initialize housekeeping tasks.
+    pub fn new(configuration: CacheConfiguration) -> Arc<Self> {
+        let registry = Arc::new(Self {
+            configuration: Arc::new(configuration),
             per_client_ldap_trees: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        });
+        registry.clone().trigger_housekeeping();
+        registry
+    }
+
+    fn trigger_housekeeping(self: Arc<Self>) {
+        tokio::spawn(self.perform_housekeeping());
+    }
+
+    /// Periodically evict inactive caches.
+    async fn perform_housekeeping(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(REGISTRY_HOUSEKEEPING_INTERVAL).await;
+
+            let mut locked_store = self.per_client_ldap_trees.write().await;
+            let mut client_caches_to_evict = Vec::new();
+            for (client, cache) in locked_store.iter() {
+                if !cache.is_active().await {
+                    client_caches_to_evict.push(client.to_owned());
+                }
+            }
+            for client in client_caches_to_evict {
+                log::info!("Evicting cache for client {} from registry", client);
+                self._unregister_client_cache(&mut locked_store, client.as_str()).await;
+            }
         }
-    }
-
-    /// Register a client registry.
-    async fn register_client_cache(&self, client: &str, cache_entry: Arc<KeycloakClientLdapCache>) {
-        self.per_client_ldap_trees.write().await.insert(client.to_string(), cache_entry);
-    }
-
-    /// Unregister a client registry
-    pub async fn unregister_client_cache(&self, client: &str) {
-        self.per_client_ldap_trees.write().await.remove(client);
     }
 
     /// Perform a bind for a client with the corresponding password.
     ///
-    /// If this registry did not yet know of a client registry for this client, create one now. If authenticating using the provided
+    /// If this registry did not yet know of a client cache for this client, create one now. If authenticating using the provided
     /// credentials against Keycloak fails, an error is returned; otherwise, the operation succeeds and the entry is
     /// inserted into the registry.
     ///
     /// If the client is already present in the registry, only check whether the provided password matches the last known
     /// correct one (see note on the [KeycloakClientLdapCache::check_password] method).
     pub async fn perform_ldap_bind_for_client(self: &Arc<Self>, client: &str, password: &str) -> Result<(), proto::LdapError> {
-        if let Some(cache_entry) = self.per_client_ldap_trees.read().await.get(client) {
-            return cache_entry.check_password(password);
+        let new_cache_entry: Arc<KeycloakClientLdapCache>;
+
+        {
+            // Locking semantic of this method:
+            // We need to acquire a lock as soon as possible in case two separate sessions try to perform a bind for the same new client:
+            // We want to avoid a scenario where both threads then start creating a new cache.
+            //
+            // However, the lock should be dropped before we start initializing the new cache, because this is a relatively time-consuming
+            // operation, and we cannot answer any queries (even for other clients) as long as we hold the exclusive lock.
+            //
+            // Doing it this way will allow the second thread to obtain the cache immediately, but issuing any search queries on it will
+            // block until the initialization of the cache issued by the first thread has finished.
+            let mut locked_store = self.per_client_ldap_trees.write().await;
+
+            if let Some(cache_entry) = locked_store.get(client) {
+                if cache_entry.is_active().await {
+                    return cache_entry.check_password(password);
+                } else {
+                    // We need to create a new cache because the old one we had cannot be used anymore.
+                    // But first, ensure the old one is being properly removed.
+                    self._unregister_client_cache(&mut locked_store, client).await;
+                }
+            }
+
+            log::info!("registry: Encountered new client '{client}', registering it");
+            new_cache_entry = Arc::new(KeycloakClientLdapCache::create(self.configuration.clone(), client, password).await?);
+            locked_store.insert(client.to_string(), new_cache_entry.clone());
+
+            // We do not need to check the password here anymore:
+            // If creation of the cache_entry has succeeded, we know that the credentials must have been valid.
         }
 
-        log::debug!("registry: Encountered unknown client '{client}', registering it");
-        let cache_entry = KeycloakClientLdapCache::create_and_initialize(self.clone(), client, password).await?;
-        self.register_client_cache(client, cache_entry).await;
-        // If creation of the cache_entry has succeeded, we know that the credentials must have been valid.
+        new_cache_entry.initialize().await?;
+
         Ok(())
     }
 
-    /// Return the registry for the given client ID.
+    /// Return the cache for the given client ID.
     pub async fn obtain_client_cache(&self, client: &str) -> Result<Arc<KeycloakClientLdapCache>, proto::LdapError> {
         if let Some(cache_entry) = self.per_client_ldap_trees.read().await.get(client) {
-            Ok(cache_entry.clone())
-        } else {
-            Err(proto::LdapError(
-                LdapResultCode::InvalidCredentials,
-                "Unknown client! Maybe the client credentials have changed during an active bind session?".to_string(),
-            ))
+            if cache_entry.is_active().await {
+                return Ok(cache_entry.clone());
+            }
+        }
+
+        Err(proto::LdapError(
+            LdapResultCode::InvalidCredentials,
+            "Unknown client! Maybe the client credentials have changed during an active bind session?".to_string(),
+        ))
+    }
+
+    /// Unregister a client cache. Will make use of an already existing lock to perform the action.
+    async fn _unregister_client_cache(
+        &self,
+        locked_store: &mut tokio::sync::RwLockWriteGuard<'_, std::collections::HashMap<String, Arc<KeycloakClientLdapCache>>>,
+        client: &str,
+    ) {
+        if let Some(cache_entry) = locked_store.get_mut(client) {
+            cache_entry.destroy().await;
+            locked_store.remove(client);
         }
     }
 }
@@ -82,10 +133,10 @@ impl CacheRegistry {
 /// A keycloak client LDAP registry keeps track of a set of user and (potentially) group information as visible to a certain keycloak client.
 /// The information is provided in form of an LDAP tree.
 /// Will periodically sync the LDAP information from keycloak.
-/// Will also automatically unregister itself from the CacheRegistry when it has become obsolete (for example, because the stored client credentials
-/// have become invalid).
 pub struct KeycloakClientLdapCache {
-    cache_registry: Arc<CacheRegistry>,
+    configuration: Arc<CacheConfiguration>,
+
+    update_task_handle: tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>,
 
     client: String,
     password: String,
@@ -96,41 +147,78 @@ pub struct KeycloakClientLdapCache {
 
 impl KeycloakClientLdapCache {
     /// Construct a new client cache.
-    /// Will make sure to perform an initial data fetching to populate the cache.
-    /// Will also initialize the cache lifecycle by triggering scheduled updates.
     ///
     /// Will only succeed iff the entered credentials are valid.
-    pub async fn create_and_initialize(registry: Arc<CacheRegistry>, client: &str, password: &str) -> Result<Arc<Self>, proto::LdapError> {
-        let service_account_client = registry.keycloak_service_account_client_builder.new_service_account(client, password).await?;
-        let cache_entry = Arc::new(Self {
-            cache_registry: registry,
+    pub async fn create(configuration: Arc<CacheConfiguration>, client: &str, password: &str) -> Result<Self, proto::LdapError> {
+        let service_account_client = configuration
+            .keycloak_service_account_client_builder
+            .new_service_account(client, password)
+            .await?;
+        Ok(Self {
+            configuration,
             client: client.to_owned(),
             password: password.to_owned(),
             service_account_client,
             last_used: tokio::sync::RwLock::new(time::Instant::now()),
             root: tokio::sync::RwLock::new(entry::LdapEntry::new("".to_string(), vec![])),
-        });
-        cache_entry.fetch().await?;
-        cache_entry.clone().trigger_scheduled_update();
-        Ok(cache_entry)
+            update_task_handle: tokio::sync::RwLock::new(None),
+        })
+    }
+
+    /// Perform an initial data fetching to populate the cache.
+    /// Will also initialize the cache lifecycle by triggering scheduled updates.
+    pub async fn initialize(self: Arc<Self>) -> Result<(), proto::LdapError> {
+        let mut lock = self.update_task_handle.write().await;
+        self.fetch().await?;
+        _ = lock.insert(self.clone().trigger_scheduled_update());
+        Ok(())
+    }
+
+    async fn await_initialization(&self) {
+        // During initialization, we obtain an exclusive lock on the handle.
+        // As soon as we are able to obtain a read handle here as well, we are ready to proceed.
+        let _ = self.update_task_handle.read().await;
+    }
+
+    /// Check whether this cache is still active and performing periodic updates.
+    pub async fn is_active(&self) -> bool {
+        let container = self.update_task_handle.read().await;
+        assert!(container.is_some(), "Update task should be created during entry creation");
+        !container.as_ref().unwrap().is_finished()
+    }
+
+    /// Destroy the cache.
+    /// Will make sure to stop the thread responsible for performing perodic updates.
+    pub async fn destroy(&self) {
+        let mut container = self.update_task_handle.write().await;
+        assert!(container.is_some(), "Update task should be created during entry creation");
+        // We will consume the handle now.
+        let handle = container.take().unwrap();
+        if !handle.is_finished() {
+            log::warn!("registry entry '{}': Destroying cache that is still active!", self.client);
+            handle.abort();
+        }
+        if let Err(e) = handle.await {
+            log::warn!("registry entry '{}': Encountered error running update handler: {e}", self.client)
+        }
     }
 
     /// Load user and group information from keycloak and convert them into an LDAP tree.
     /// Will only load groups if the registry tells us to do so.
     async fn fetch(&self) -> Result<(), proto::LdapError> {
-        let mut root = self.cache_registry.ldap_entry_builder.rootdse();
-        root.add_subordinate(self.cache_registry.ldap_entry_builder.subschema());
+        let mut root = self.configuration.ldap_entry_builder.rootdse();
+        root.add_subordinate(self.configuration.ldap_entry_builder.subschema());
 
-        let mut organization = self.cache_registry.ldap_entry_builder.organization();
+        let mut organization = self.configuration.ldap_entry_builder.organization();
         let mut users: std::collections::HashMap<String, entry::LdapEntry> = self
             .service_account_client
-            .query_users(self.cache_registry.num_users_to_fetch)
+            .query_users(self.configuration.num_users_to_fetch)
             .await?
             .into_iter()
-            .filter_map(|user| Some((user.id.clone()?, self.cache_registry.ldap_entry_builder.build_from_keycloak_user(user)?)))
+            .filter_map(|user| Some((user.id.clone()?, self.configuration.ldap_entry_builder.build_from_keycloak_user(user)?)))
             .collect();
 
-        if self.cache_registry.include_group_info {
+        if self.configuration.include_group_info {
             let groups: Vec<keycloak::types::GroupRepresentation> = self.service_account_client.query_named_groups().await?;
             for group in groups.into_iter() {
                 let group_associated_users = self
@@ -141,7 +229,7 @@ impl KeycloakClientLdapCache {
                     )
                     .await?;
                 let ldap_group =
-                    self.cache_registry
+                    self.configuration
                         .ldap_entry_builder
                         .build_from_keycloak_group_with_associated_users(group, &mut users, &group_associated_users);
                 organization.add_subordinate(ldap_group);
@@ -158,27 +246,25 @@ impl KeycloakClientLdapCache {
     }
 
     /// Launch a new task responsible for periodically syncing the cache data from keycloak.
-    pub fn trigger_scheduled_update(self: Arc<Self>) {
-        tokio::spawn(self.perform_scheduled_update());
+    pub fn trigger_scheduled_update(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(self.perform_scheduled_update())
     }
 
-    /// Periodically sync the cache data from keycloak.
-    /// The cache will REMOVE ITSELF from the registry if it should be pruned or updating has failed.
+    /// Periodically sync the cache data from keycloak as long as the cache should not be pruned.
     async fn perform_scheduled_update(self: Arc<Self>) {
         loop {
-            tokio::time::sleep(self.cache_registry.cache_update_interval).await;
+            tokio::time::sleep(self.configuration.cache_update_interval).await;
 
             if self.should_be_pruned().await {
-                log::info!("registry entry '{}': Pruning registry entry.", self.client);
-                self.cache_registry.unregister_client_cache(&self.client).await;
+                // TODO: proper logging
+                log::info!("registry entry '{}': Terminating scheduled update due to pruning condition.", self.client);
                 return;
             }
 
             if self.fetch().await.is_ok() {
                 log::debug!("registry entry '{}': Updated registry entry.", self.client);
             } else {
-                log::info!("registry entry '{}': Pruning registry entry because update failed.", self.client);
-                self.cache_registry.unregister_client_cache(&self.client).await;
+                log::info!("registry entry '{}': Terminating scheduled update due to update failure.", self.client);
                 return;
             }
         }
@@ -186,7 +272,7 @@ impl KeycloakClientLdapCache {
 
     /// Whether this cache should be evicted from the registry because it was not used for too long.
     async fn should_be_pruned(&self) -> bool {
-        self.last_used.read().await.elapsed() >= self.cache_registry.max_entry_inactive_time
+        self.last_used.read().await.elapsed() >= self.configuration.max_entry_inactive_time
     }
 
     /// Check whether the provided password matches the one we have cached.
@@ -207,17 +293,10 @@ impl KeycloakClientLdapCache {
         }
     }
 
-    async fn initialized(&self) -> bool {
-        self.root.read().await.has_subordinates()
-    }
-
     /// Answer an LDAP search query using our cached LDAP tree.
     /// Also registers the current timestamp as the time this cache was last used.
     pub async fn search(&self, search_request: &SearchRequest) -> Result<Vec<LdapSearchResultEntry>, proto::LdapError> {
-        assert!(
-            self.initialized().await,
-            "A registry entry must be initialized before being able to serve search requests!"
-        );
+        self.await_initialization().await;
 
         let mut instant = self.last_used.write().await;
         *instant = time::Instant::now();
@@ -309,7 +388,7 @@ mod test {
                     .expect("registering should succeed");
 
                 // when
-                registry.unregister_client_cache(proto::tests::DEFAULT_CLIENT_ID).await;
+                registry._unregister_client_cache(proto::tests::DEFAULT_CLIENT_ID).await;
 
                 // then
                 assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));

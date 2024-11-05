@@ -142,14 +142,15 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let cache_registry = Arc::new(cache::CacheRegistry::new(
-        keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
-        args.num_users,
+    let cache_configuration = cache::CacheConfiguration {
+        keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
+        num_users_to_fetch: args.num_users,
         include_group_info,
-        time::Duration::from_secs(args.cache_update_interval_secs),
-        time::Duration::from_secs(args.cache_entry_max_inactive_secs),
-        entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
-    ));
+        cache_update_interval: time::Duration::from_secs(args.cache_update_interval_secs),
+        max_entry_inactive_time: time::Duration::from_secs(args.cache_entry_max_inactive_secs),
+        ldap_entry_builder: entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
+    };
+    let cache_registry = cache::CacheRegistry::new(cache_configuration);
     let handler = Arc::from(proto::LdapHandler::new(cache_registry));
 
     loop {
