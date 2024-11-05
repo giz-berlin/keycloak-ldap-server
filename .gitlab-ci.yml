@@ -3,6 +3,7 @@ image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/rust:1
 stages:
   - build
   - test
+  - pack
 
 build:
   stage: build
@@ -14,25 +15,6 @@ build:
     expire_in: 1 week
     when: always
   needs: []
-
-pack:
-  stage: build
-  image:
-    name: gcr.io/kaniko-project/executor:v1.15.0-debug
-    entrypoint: [ "" ]
-  needs:
-    - job: build
-      artifacts: true
-  script:
-    - |+
-      build() {
-        TARGET_BINARY=$1
-        IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$TARGET_BINARY
-        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
-          --build-arg "BINARY=$TARGET_BINARY" \
-          --destination "$IMAGE_NAME:latest" --destination "$IMAGE_NAME:v1" --destination "$IMAGE_NAME:$CI_PIPELINE_IID"
-      }
-    - build printer-ldap
 
 lint:
   stage: test
@@ -91,3 +73,22 @@ e2e-test:
     - sleep 1
     - LDAPTLS_CACERT=certificates/ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
     - grep 'dc=giz,dc=berlin' ldap_result.txt
+
+docker-image:
+  stage: pack
+  image:
+    name: gcr.io/kaniko-project/executor:v1.15.0-debug
+    entrypoint: [ "" ]
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - |+
+      build() {
+        TARGET_BINARY=$1
+        IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$TARGET_BINARY
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+          --build-arg "BINARY=$TARGET_BINARY" \
+          --destination "$IMAGE_NAME:latest" --destination "$IMAGE_NAME:$CI_PIPELINE_IID"
+      }
+    - build printer-ldap
