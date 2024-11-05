@@ -85,7 +85,7 @@ impl Display for LdapClientSession {
 /// This method is meant to be the ONLY method called from the main function
 /// of a derived binary. It will handle argument parsing and setup logging, which the derived binary
 /// is expected to NOT do itself.
-pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::KeycloakUserAttributeExtractor>) -> anyhow::Result<()> {
+pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::KeycloakUserAttributeExtractor>, include_group_info: bool) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
     simple_logger::SimpleLogger::new()
@@ -103,6 +103,7 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
     let handler = Arc::from(proto::LdapHandler::new(
         args.base_distinguished_name.clone(),
         args.num_users,
+        include_group_info,
         keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
         entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
     ));
