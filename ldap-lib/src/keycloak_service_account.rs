@@ -229,7 +229,7 @@ mod client {
         pub fn new(_: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>, _: String) -> Self {
             // Take out the instance we configured earlier. Will take ownership of this instance, which means
             // this method may only be called once before we have to configure a new instance.
-            // Luckily, once instance is all we need for the tests.
+            // Luckily, one instance is all we need for the tests.
             lock_ignoring_poison!(MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON).take().unwrap()
         }
 

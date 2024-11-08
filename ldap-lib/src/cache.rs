@@ -14,7 +14,7 @@ pub struct CacheConfiguration {
     pub ldap_entry_builder: entry::LdapEntryBuilder,
 }
 
-const REGISTRY_HOUSEKEEPING_INTERVAL: time::Duration = time::Duration::from_secs(5);
+pub const REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL: time::Duration = time::Duration::from_secs(5);
 
 /// A thread-safe registry keeping track of and allowing access to all active client caches.
 /// Will periodically evict inactive caches.
@@ -25,23 +25,23 @@ pub struct CacheRegistry {
 
 impl CacheRegistry {
     /// Create a new registry and initialize housekeeping tasks.
-    pub fn new(configuration: CacheConfiguration) -> Arc<Self> {
+    pub fn new(configuration: CacheConfiguration, housekeeping_interval: time::Duration) -> Arc<Self> {
         let registry = Arc::new(Self {
             configuration: Arc::new(configuration),
             per_client_ldap_trees: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         });
-        registry.clone().trigger_housekeeping();
+        registry.clone().trigger_housekeeping(housekeeping_interval);
         registry
     }
 
-    fn trigger_housekeeping(self: Arc<Self>) {
-        tokio::spawn(self.perform_housekeeping());
+    fn trigger_housekeeping(self: Arc<Self>, housekeeping_interval: time::Duration) {
+        tokio::spawn(self.perform_housekeeping(housekeeping_interval));
     }
 
     /// Periodically evict inactive caches.
-    async fn perform_housekeeping(self: Arc<Self>) {
+    async fn perform_housekeeping(self: Arc<Self>, housekeeping_interval: time::Duration) {
         loop {
-            tokio::time::sleep(REGISTRY_HOUSEKEEPING_INTERVAL).await;
+            tokio::time::sleep(housekeeping_interval).await;
 
             let mut locked_store = self.per_client_ldap_trees.write().await;
             let mut client_caches_to_evict = Vec::new();
@@ -156,12 +156,12 @@ impl KeycloakClientLdapCache {
             .await?;
         Ok(Self {
             configuration,
+            update_task_handle: tokio::sync::RwLock::new(None),
             client: client.to_owned(),
             password: password.to_owned(),
             service_account_client,
             last_used: tokio::sync::RwLock::new(time::Instant::now()),
             root: tokio::sync::RwLock::new(entry::LdapEntry::new("".to_string(), vec![])),
-            update_task_handle: tokio::sync::RwLock::new(None),
         })
     }
 
@@ -187,11 +187,17 @@ impl KeycloakClientLdapCache {
         !container.as_ref().unwrap().is_finished()
     }
 
+    /// Check whether this cache has been destroyed.
+    async fn is_destroyed(&self) -> bool {
+        self.update_task_handle.read().await.is_none()
+    }
+
     /// Destroy the cache.
     /// Will make sure to stop the thread responsible for performing perodic updates.
     pub async fn destroy(&self) {
+        assert!(!self.is_destroyed().await, "Attempted to destroy a cache that is already destroyed!");
+
         let mut container = self.update_task_handle.write().await;
-        assert!(container.is_some(), "Update task should be created during entry creation");
         // We will consume the handle now.
         let handle = container.take().unwrap();
         if !handle.is_finished() {
@@ -312,28 +318,83 @@ mod test {
     use rstest::{fixture, rstest};
 
     use super::*;
-    use crate::{keycloak_service_account, proto};
+    use crate::{keycloak_service_account, proto, test_util::util};
 
+    const REGISTRY_HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(40);
     const CACHE_UPDATE_INTERVAL: Duration = Duration::from_millis(20);
-    const CACHE_UPDATE_CHECK_INTERVAL: Duration = Duration::from_millis(25);
     const MAX_ENTRY_INACTIVE_TIME: Duration = Duration::from_secs(60);
 
     #[fixture]
     fn registry(#[default(false)] include_group_info: bool) -> Arc<CacheRegistry> {
-        Arc::new(CacheRegistry::new(
-            keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
-            proto::tests::DEFAULT_USERS_TO_FETCH,
-            include_group_info,
-            CACHE_UPDATE_INTERVAL,
-            MAX_ENTRY_INACTIVE_TIME,
-            proto::tests::entry_builder(),
-        ))
+        CacheRegistry::new(
+            CacheConfiguration {
+                keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
+                num_users_to_fetch: proto::tests::DEFAULT_USERS_TO_FETCH,
+                include_group_info,
+                cache_update_interval: CACHE_UPDATE_INTERVAL,
+                max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,
+                ldap_entry_builder: proto::tests::ldap_entry_builder(),
+            },
+            REGISTRY_HOUSEKEEPING_INTERVAL,
+        )
     }
 
     mod cache_registry {
         use super::*;
 
-        mod when_perform_ldap_bind_for_client {
+        mod when_performing_housekeeping {
+            use super::*;
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_prune_inactive_cache(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+
+                {
+                    let mut locked_store = registry.per_client_ldap_trees.write().await;
+                    let cache = keycloak_client_ldap_cache::create_inactive_cache(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await;
+                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
+                }
+
+                // when
+                util::await_concurrent_task_progress(REGISTRY_HOUSEKEEPING_INTERVAL).await;
+                assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_do_not_prune_active_cache(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+
+                {
+                    let mut locked_store = registry.per_client_ldap_trees.write().await;
+                    let cache = Arc::new(
+                        KeycloakClientLdapCache::create(
+                            registry.configuration.clone(),
+                            proto::tests::DEFAULT_CLIENT_ID,
+                            proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        )
+                        .await
+                        .expect("Construction"),
+                    );
+                    cache.clone().initialize().await.unwrap();
+                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), cache);
+                }
+
+                // when
+                util::await_concurrent_task_progress(REGISTRY_HOUSEKEEPING_INTERVAL).await;
+                assert!(registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+            }
+        }
+
+        mod when_performing_ldap_bind_for_client {
             use super::*;
 
             #[rstest]
@@ -346,10 +407,44 @@ mod test {
                 registry
                     .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
                     .await
-                    .expect("registering should succeed");
+                    .unwrap();
 
                 // then
                 assert!(registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn and_client_is_inactive__then_create_new_one_and_destroy_old_one(registry: Arc<CacheRegistry>) {
+                // given
+                let old_cache: Arc<KeycloakClientLdapCache>;
+                {
+                    let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                    old_cache = Arc::new(
+                        keycloak_client_ldap_cache::create_inactive_cache(
+                            registry.configuration.clone(),
+                            proto::tests::DEFAULT_CLIENT_ID,
+                            proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        )
+                        .await,
+                    );
+                    let mut locked_store = registry.per_client_ldap_trees.write().await;
+                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), old_cache.clone());
+                }
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+
+                // when
+                registry
+                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .await
+                    .unwrap();
+
+                // then
+                assert!(!Arc::ptr_eq(
+                    registry.per_client_ldap_trees.read().await.get(proto::tests::DEFAULT_CLIENT_ID).unwrap(),
+                    &old_cache
+                ));
+                assert!(old_cache.is_destroyed().await);
             }
 
             #[rstest]
@@ -374,29 +469,22 @@ mod test {
             }
         }
 
-        mod when_unregistering_entry {
+        mod when_obtaining_client_cache {
             use super::*;
 
             #[rstest]
             #[tokio::test]
-            async fn then_it_is_gone(registry: Arc<CacheRegistry>) {
+            async fn then_return_it(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 registry
                     .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
                     .await
-                    .expect("registering should succeed");
+                    .unwrap();
 
-                // when
-                registry._unregister_client_cache(proto::tests::DEFAULT_CLIENT_ID).await;
-
-                // then
-                assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                // when & then
+                assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_ok());
             }
-        }
-
-        mod when_obtaining_client_cache {
-            use super::*;
 
             #[rstest]
             #[tokio::test]
@@ -404,29 +492,43 @@ mod test {
                 // when & then
                 assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_err());
             }
-        }
-    }
-
-    mod keycloak_client_ldap_cache {
-        use super::*;
-
-        mod when_create {
-            use super::*;
 
             #[rstest]
             #[tokio::test]
-            async fn then_fetch_information(registry: Arc<CacheRegistry>) {
+            async fn for_inactive_client__then_return_error(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                {
+                    let mut locked_store = registry.per_client_ldap_trees.write().await;
+                    let cache = keycloak_client_ldap_cache::create_inactive_cache(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await;
+                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
+                }
 
-                // when
-                let entry = KeycloakClientLdapCache::create_and_initialize(registry, proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                    .await
-                    .expect("creation should succeed");
-
-                // then
-                assert!(entry.root.read().await.has_subordinates());
+                // when & then
+                assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_err());
             }
+        }
+    }
+    mod keycloak_client_ldap_cache {
+        use super::*;
+
+        pub async fn create_inactive_cache(configuration: Arc<CacheConfiguration>, client_id: &str, password: &str) -> KeycloakClientLdapCache {
+            let client = KeycloakClientLdapCache::create(configuration, client_id, password).await.unwrap();
+            {
+                let mut handle_lock = client.update_task_handle.write().await;
+                _ = handle_lock.insert(tokio::spawn(util::async_noop())); // This will make the task terminate immediately.
+                                                                          // However, we still have to wait slightly due to scheduling overhead
+                util::await_concurrent_task_progress(Duration::from_millis(10)).await;
+            }
+            client
+        }
+        mod when_create {
+            use super::*;
 
             #[rstest]
             #[tokio::test]
@@ -435,11 +537,38 @@ mod test {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_err(LdapResultCode::InvalidCredentials);
 
                 // when & then
-                assert!(
-                    KeycloakClientLdapCache::create_and_initialize(registry, proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                        .await
-                        .is_err()
+                assert!(KeycloakClientLdapCache::create(
+                    registry.configuration.clone(),
+                    proto::tests::DEFAULT_CLIENT_ID,
+                    proto::tests::DEFAULT_CLIENT_PASSWORD
+                )
+                .await
+                .is_err());
+            }
+        }
+        mod when_initialize {
+            use super::*;
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_fetch_information(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
                 );
+
+                // when
+                cache.clone().initialize().await.unwrap();
+
+                // then
+                assert!(cache.root.read().await.has_subordinates());
             }
 
             #[rstest]
@@ -447,18 +576,121 @@ mod test {
             async fn then_trigger_scheduled_update(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let client_cache =
-                    KeycloakClientLdapCache::create_and_initialize(registry, proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                        .await
-                        .unwrap();
+                let client_cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
 
                 // when
                 let initial_query_count = client_cache.service_account_client.call_count();
-                tokio::time::sleep(CACHE_UPDATE_CHECK_INTERVAL).await;
+                client_cache.clone().initialize().await.unwrap();
+                util::await_concurrent_task_progress(CACHE_UPDATE_INTERVAL).await;
 
                 // then
                 let current_query_count = client_cache.service_account_client.call_count();
                 assert!(current_query_count > initial_query_count);
+            }
+        }
+
+        mod when_checking_if_active {
+            use super::*;
+
+            #[rstest]
+            #[tokio::test]
+            async fn and_update_task_still_running__then_return_true(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
+
+                // when
+                cache.clone().initialize().await.unwrap();
+
+                // then
+                assert!(cache.is_active().await);
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn and_update_task_no_longer_running__then_return_false(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                let cache = KeycloakClientLdapCache::create(
+                    registry.configuration.clone(),
+                    proto::tests::DEFAULT_CLIENT_ID,
+                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                )
+                .await
+                .unwrap();
+
+                // when
+                _ = cache.update_task_handle.write().await.insert(tokio::spawn(util::async_noop()));
+                util::await_concurrent_task_progress(Duration::from_millis(10)).await;
+
+                // then
+                assert!(!cache.is_active().await);
+            }
+        }
+
+        mod when_destroying {
+            use super::*;
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_it_is_marked_destroyed(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
+                cache.clone().initialize().await.unwrap();
+
+                // when
+                cache.destroy().await;
+
+                // then
+                assert!(cache.is_destroyed().await);
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_update_task_is_removed(registry: Arc<CacheRegistry>) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
+                cache.clone().initialize().await.unwrap();
+
+                // when
+                cache.destroy().await;
+
+                // then
+                assert!(cache.update_task_handle.read().await.is_none());
             }
         }
 
@@ -477,18 +709,24 @@ mod test {
             async fn then_periodically_update_data(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let entry =
-                    KeycloakClientLdapCache::create_and_initialize(registry.clone(), proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                        .await
-                        .unwrap();
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
 
                 // when
-                let mut initial_query_count = entry.service_account_client.call_count();
+                let mut initial_query_count = cache.service_account_client.call_count();
+                cache.clone().initialize().await.unwrap();
 
                 // then
                 for _ in 0..3 {
-                    tokio::time::sleep(CACHE_UPDATE_CHECK_INTERVAL).await;
-                    let current_query_count = entry.service_account_client.call_count();
+                    util::await_concurrent_task_progress(CACHE_UPDATE_INTERVAL).await;
+                    let current_query_count = cache.service_account_client.call_count();
                     assert!(current_query_count > initial_query_count);
                     initial_query_count = current_query_count;
                 }
@@ -496,44 +734,56 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_prune_old_entry(registry: Arc<CacheRegistry>) {
+            async fn then_stop_when_inactive(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let entry =
-                    KeycloakClientLdapCache::create_and_initialize(registry.clone(), proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                        .await
-                        .unwrap();
-                registry.register_client_cache(proto::tests::DEFAULT_CLIENT_ID, entry.clone()).await;
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
+                cache.clone().initialize().await.unwrap();
 
                 // when
-                *entry.last_used.write().await = time::Instant::now().sub(MAX_ENTRY_INACTIVE_TIME);
-                tokio::time::sleep(CACHE_UPDATE_CHECK_INTERVAL).await;
+                *cache.last_used.write().await = time::Instant::now().sub(MAX_ENTRY_INACTIVE_TIME);
+                util::await_concurrent_task_progress(CACHE_UPDATE_INTERVAL).await;
 
                 // then
-                assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                assert!(cache.update_task_handle.read().await.as_ref().unwrap().is_finished());
             }
 
             #[rstest]
             #[tokio::test]
-            async fn then_prune_entry_on_update_error(registry: Arc<CacheRegistry>) {
+            async fn then_stop_on_update_error(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let entry =
-                    KeycloakClientLdapCache::create_and_initialize(registry.clone(), proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                        .await
-                        .unwrap();
-                registry.register_client_cache(proto::tests::DEFAULT_CLIENT_ID, entry.clone()).await;
+                let cache = Arc::new(
+                    KeycloakClientLdapCache::create(
+                        registry.configuration.clone(),
+                        proto::tests::DEFAULT_CLIENT_ID,
+                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    )
+                    .await
+                    .unwrap(),
+                );
 
                 // when
-                entry.service_account_client.change_err(LdapResultCode::InvalidCredentials);
-                tokio::time::sleep(CACHE_UPDATE_CHECK_INTERVAL).await;
+                cache.clone().initialize().await.unwrap();
+                cache.service_account_client.change_err(LdapResultCode::InvalidCredentials);
+                util::await_concurrent_task_progress(CACHE_UPDATE_INTERVAL).await;
 
                 // then
-                assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                assert!(cache.update_task_handle.read().await.as_ref().unwrap().is_finished());
             }
         }
 
         mod when_checking_password {
+            use std::clone::Clone;
+
             use super::*;
 
             #[rstest]
@@ -541,9 +791,13 @@ mod test {
             async fn then_accept_valid_password(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let entry = KeycloakClientLdapCache::create_and_initialize(registry, proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                    .await
-                    .unwrap();
+                let entry = KeycloakClientLdapCache::create(
+                    registry.configuration.clone(),
+                    proto::tests::DEFAULT_CLIENT_ID,
+                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                )
+                .await
+                .unwrap();
 
                 // when & then
                 assert!(entry.check_password(proto::tests::DEFAULT_CLIENT_PASSWORD).is_ok());
@@ -554,9 +808,13 @@ mod test {
             async fn then_reject_invalid_password(registry: Arc<CacheRegistry>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
-                let entry = KeycloakClientLdapCache::create_and_initialize(registry, proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
-                    .await
-                    .unwrap();
+                let entry = KeycloakClientLdapCache::create(
+                    registry.configuration.clone(),
+                    proto::tests::DEFAULT_CLIENT_ID,
+                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                )
+                .await
+                .unwrap();
 
                 // when & then
                 assert!(entry.check_password("invalid-password").is_err());

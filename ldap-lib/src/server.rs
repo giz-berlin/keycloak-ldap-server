@@ -150,7 +150,7 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
         max_entry_inactive_time: time::Duration::from_secs(args.cache_entry_max_inactive_secs),
         ldap_entry_builder: entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, user_attribute_extractor),
     };
-    let cache_registry = cache::CacheRegistry::new(cache_configuration);
+    let cache_registry = cache::CacheRegistry::new(cache_configuration, cache::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
     let handler = Arc::from(proto::LdapHandler::new(cache_registry));
 
     loop {
