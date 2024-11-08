@@ -318,7 +318,10 @@ mod test {
     use rstest::{fixture, rstest};
 
     use super::*;
-    use crate::{keycloak_service_account, proto, test_util::util};
+    use crate::{
+        keycloak_service_account, proto,
+        test_util::{test_constants, util},
+    };
 
     const REGISTRY_HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(40);
     const CACHE_UPDATE_INTERVAL: Duration = Duration::from_millis(20);
@@ -329,7 +332,7 @@ mod test {
         CacheRegistry::new(
             CacheConfiguration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
-                num_users_to_fetch: proto::tests::DEFAULT_USERS_TO_FETCH,
+                num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
                 include_group_info,
                 cache_update_interval: CACHE_UPDATE_INTERVAL,
                 max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,
@@ -355,16 +358,16 @@ mod test {
                     let mut locked_store = registry.per_client_ldap_trees.write().await;
                     let cache = keycloak_client_ldap_cache::create_inactive_cache(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await;
-                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
+                    locked_store.insert(test_constants::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
                 }
 
                 // when
                 util::await_concurrent_task_progress(REGISTRY_HOUSEKEEPING_INTERVAL).await;
-                assert!(!registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                assert!(!registry.per_client_ldap_trees.read().await.contains_key(test_constants::DEFAULT_CLIENT_ID));
             }
 
             #[rstest]
@@ -378,19 +381,19 @@ mod test {
                     let cache = Arc::new(
                         KeycloakClientLdapCache::create(
                             registry.configuration.clone(),
-                            proto::tests::DEFAULT_CLIENT_ID,
-                            proto::tests::DEFAULT_CLIENT_PASSWORD,
+                            test_constants::DEFAULT_CLIENT_ID,
+                            test_constants::DEFAULT_CLIENT_PASSWORD,
                         )
                         .await
                         .expect("Construction"),
                     );
                     cache.clone().initialize().await.unwrap();
-                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), cache);
+                    locked_store.insert(test_constants::DEFAULT_CLIENT_ID.to_string(), cache);
                 }
 
                 // when
                 util::await_concurrent_task_progress(REGISTRY_HOUSEKEEPING_INTERVAL).await;
-                assert!(registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                assert!(registry.per_client_ldap_trees.read().await.contains_key(test_constants::DEFAULT_CLIENT_ID));
             }
         }
 
@@ -405,12 +408,12 @@ mod test {
 
                 // when
                 registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
                     .await
                     .unwrap();
 
                 // then
-                assert!(registry.per_client_ldap_trees.read().await.contains_key(proto::tests::DEFAULT_CLIENT_ID));
+                assert!(registry.per_client_ldap_trees.read().await.contains_key(test_constants::DEFAULT_CLIENT_ID));
             }
 
             #[rstest]
@@ -423,25 +426,25 @@ mod test {
                     old_cache = Arc::new(
                         keycloak_client_ldap_cache::create_inactive_cache(
                             registry.configuration.clone(),
-                            proto::tests::DEFAULT_CLIENT_ID,
-                            proto::tests::DEFAULT_CLIENT_PASSWORD,
+                            test_constants::DEFAULT_CLIENT_ID,
+                            test_constants::DEFAULT_CLIENT_PASSWORD,
                         )
                         .await,
                     );
                     let mut locked_store = registry.per_client_ldap_trees.write().await;
-                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), old_cache.clone());
+                    locked_store.insert(test_constants::DEFAULT_CLIENT_ID.to_string(), old_cache.clone());
                 }
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
 
                 // when
                 registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
                     .await
                     .unwrap();
 
                 // then
                 assert!(!Arc::ptr_eq(
-                    registry.per_client_ldap_trees.read().await.get(proto::tests::DEFAULT_CLIENT_ID).unwrap(),
+                    registry.per_client_ldap_trees.read().await.get(test_constants::DEFAULT_CLIENT_ID).unwrap(),
                     &old_cache
                 ));
                 assert!(old_cache.is_destroyed().await);
@@ -453,17 +456,17 @@ mod test {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
                     .await
                     .expect("registering should succeed");
 
                 // when & then
                 assert!(registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
                     .await
                     .is_ok());
                 assert!(registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, "wrong-password")
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, "wrong-password")
                     .await
                     .is_err());
             }
@@ -478,19 +481,19 @@ mod test {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 registry
-                    .perform_ldap_bind_for_client(proto::tests::DEFAULT_CLIENT_ID, proto::tests::DEFAULT_CLIENT_PASSWORD)
+                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
                     .await
                     .unwrap();
 
                 // when & then
-                assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_ok());
+                assert!(registry.obtain_client_cache(test_constants::DEFAULT_CLIENT_ID).await.is_ok());
             }
 
             #[rstest]
             #[tokio::test]
             async fn for_unknown_client__then_return_error(registry: Arc<CacheRegistry>) {
                 // when & then
-                assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_err());
+                assert!(registry.obtain_client_cache(test_constants::DEFAULT_CLIENT_ID).await.is_err());
             }
 
             #[rstest]
@@ -502,15 +505,15 @@ mod test {
                     let mut locked_store = registry.per_client_ldap_trees.write().await;
                     let cache = keycloak_client_ldap_cache::create_inactive_cache(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await;
-                    locked_store.insert(proto::tests::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
+                    locked_store.insert(test_constants::DEFAULT_CLIENT_ID.to_string(), Arc::new(cache));
                 }
 
                 // when & then
-                assert!(registry.obtain_client_cache(proto::tests::DEFAULT_CLIENT_ID).await.is_err());
+                assert!(registry.obtain_client_cache(test_constants::DEFAULT_CLIENT_ID).await.is_err());
             }
         }
     }
@@ -539,8 +542,8 @@ mod test {
                 // when & then
                 assert!(KeycloakClientLdapCache::create(
                     registry.configuration.clone(),
-                    proto::tests::DEFAULT_CLIENT_ID,
-                    proto::tests::DEFAULT_CLIENT_PASSWORD
+                    test_constants::DEFAULT_CLIENT_ID,
+                    test_constants::DEFAULT_CLIENT_PASSWORD
                 )
                 .await
                 .is_err());
@@ -557,8 +560,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -579,8 +582,8 @@ mod test {
                 let client_cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -608,8 +611,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -629,8 +632,8 @@ mod test {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 let cache = KeycloakClientLdapCache::create(
                     registry.configuration.clone(),
-                    proto::tests::DEFAULT_CLIENT_ID,
-                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    test_constants::DEFAULT_CLIENT_ID,
+                    test_constants::DEFAULT_CLIENT_PASSWORD,
                 )
                 .await
                 .unwrap();
@@ -655,8 +658,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -678,8 +681,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -712,8 +715,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -740,8 +743,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -764,8 +767,8 @@ mod test {
                 let cache = Arc::new(
                     KeycloakClientLdapCache::create(
                         registry.configuration.clone(),
-                        proto::tests::DEFAULT_CLIENT_ID,
-                        proto::tests::DEFAULT_CLIENT_PASSWORD,
+                        test_constants::DEFAULT_CLIENT_ID,
+                        test_constants::DEFAULT_CLIENT_PASSWORD,
                     )
                     .await
                     .unwrap(),
@@ -793,14 +796,14 @@ mod test {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 let entry = KeycloakClientLdapCache::create(
                     registry.configuration.clone(),
-                    proto::tests::DEFAULT_CLIENT_ID,
-                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    test_constants::DEFAULT_CLIENT_ID,
+                    test_constants::DEFAULT_CLIENT_PASSWORD,
                 )
                 .await
                 .unwrap();
 
                 // when & then
-                assert!(entry.check_password(proto::tests::DEFAULT_CLIENT_PASSWORD).is_ok());
+                assert!(entry.check_password(test_constants::DEFAULT_CLIENT_PASSWORD).is_ok());
             }
 
             #[rstest]
@@ -810,8 +813,8 @@ mod test {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 let entry = KeycloakClientLdapCache::create(
                     registry.configuration.clone(),
-                    proto::tests::DEFAULT_CLIENT_ID,
-                    proto::tests::DEFAULT_CLIENT_PASSWORD,
+                    test_constants::DEFAULT_CLIENT_ID,
+                    test_constants::DEFAULT_CLIENT_PASSWORD,
                 )
                 .await
                 .unwrap();
