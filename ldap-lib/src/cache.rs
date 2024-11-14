@@ -9,7 +9,6 @@ pub struct CacheConfiguration {
     pub keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder,
     pub num_users_to_fetch: i32,
     pub include_group_info: bool,
-    pub flatten_group_hierarchy: bool,
     pub cache_update_interval: time::Duration,
     pub max_entry_inactive_time: time::Duration,
     pub ldap_entry_builder: entry::LdapEntryBuilder,
@@ -194,7 +193,7 @@ impl KeycloakClientLdapCache {
     }
 
     /// Destroy the cache.
-    /// Will make sure to stop the thread responsible for performing perodic updates.
+    /// Will make sure to stop the thread responsible for performing periodic updates.
     pub async fn destroy(&self) {
         assert!(!self.is_destroyed().await, "Attempted to destroy a cache that is already destroyed!");
 
@@ -228,11 +227,8 @@ impl KeycloakClientLdapCache {
         if self.configuration.include_group_info {
             let groups: Vec<keycloak::types::GroupRepresentation> = self.service_account_client.query_named_groups().await?;
             for group in groups.into_iter() {
-                let (group_entry, flattened_subgroup_entries) = self.fetch_group(group, None, &mut users).await?;
+                let group_entry = self.fetch_group(group, None, &mut users).await?;
                 organization.add_subordinate(group_entry);
-                for entry in flattened_subgroup_entries {
-                    organization.add_subordinate(entry);
-                }
             }
         }
         users.into_values().for_each(|user| {
@@ -251,7 +247,7 @@ impl KeycloakClientLdapCache {
         group: keycloak::types::GroupRepresentation,
         parent_group: Option<&entry::LdapEntry>,
         users: &mut std::collections::HashMap<String, entry::LdapEntry>,
-    ) -> Result<(entry::LdapEntry, Vec<entry::LdapEntry>), proto::LdapError> {
+    ) -> Result<entry::LdapEntry, proto::LdapError> {
         // We can unwrap here because we made sure to filter out groups without a id
         let group_id = group.id.as_ref().unwrap();
         let group_associated_users = self.service_account_client.query_users_in_group(group_id).await?;
@@ -263,32 +259,17 @@ impl KeycloakClientLdapCache {
             Vec::new()
         };
 
-        let mut ldap_group = self.configuration.ldap_entry_builder.build_from_keycloak_group_with_associated_users(
-            group,
-            self.configuration.flatten_group_hierarchy,
-            parent_group,
-            users,
-            &group_associated_users,
-        );
+        let mut ldap_group =
+            self.configuration
+                .ldap_entry_builder
+                .build_from_keycloak_group_with_associated_users(group, parent_group, users, &group_associated_users);
 
-        let mut subgroups_on_same_hierarchy_level = Vec::new();
         for sub_group in sub_groups.into_iter() {
-            let (ldap_sub_group, mut sub_sub_groups_same_hierarchy_level) = self.fetch_group(sub_group, Some(&ldap_group), users).await?;
-            if self.configuration.flatten_group_hierarchy {
-                // The subgroups will be on the same tree level as this group.
-                subgroups_on_same_hierarchy_level.push(ldap_sub_group);
-                subgroups_on_same_hierarchy_level.append(&mut sub_sub_groups_same_hierarchy_level);
-            } else {
-                // The subgroups are part of this group's subtree.
-                ldap_group.add_subordinate(ldap_sub_group);
-                assert!(
-                    sub_sub_groups_same_hierarchy_level.is_empty(),
-                    "Subgroup declared SubSubGroups on same hierarchy level despite group hierarchy flattening disabled!"
-                );
-            }
+            let ldap_sub_group = self.fetch_group(sub_group, Some(&ldap_group), users).await?;
+            ldap_group.add_subordinate(ldap_sub_group);
         }
 
-        Ok((ldap_group, subgroups_on_same_hierarchy_level))
+        Ok(ldap_group)
     }
 
     /// Launch a new task responsible for periodically syncing the cache data from keycloak.
@@ -368,13 +349,12 @@ mod test {
     const MAX_ENTRY_INACTIVE_TIME: Duration = Duration::from_secs(60);
 
     #[fixture]
-    fn registry(#[default(false)] include_group_info: bool, #[default(false)] flatten_group_hierarchy: bool) -> Arc<CacheRegistry> {
+    fn registry(#[default(false)] include_group_info: bool) -> Arc<CacheRegistry> {
         CacheRegistry::new(
             CacheConfiguration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
                 num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
                 include_group_info,
-                flatten_group_hierarchy,
                 cache_update_interval: CACHE_UPDATE_INTERVAL,
                 max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,
                 ldap_entry_builder: proto::tests::ldap_entry_builder(),

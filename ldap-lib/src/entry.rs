@@ -111,7 +111,7 @@ impl LdapEntryBuilder {
     /// The full name of a group, escaped by replacing all '/' with '_'.
     /// If a parent group name has been given, the name of
     /// the group will be appended to the name of the parent group.
-    pub fn group_name(&self, group_name: &str, parent_group_name: Option<&str>) -> String {
+    pub fn full_group_name(&self, group_name: &str, parent_group_name: Option<&str>) -> String {
         let escaped_name = group_name.replace("/", "_");
         if let Some(parent_name) = parent_group_name {
             parent_name.to_owned() + "/" + &escaped_name
@@ -129,32 +129,25 @@ impl LdapEntryBuilder {
     pub fn build_from_keycloak_group_with_associated_users(
         &self,
         group: keycloak::types::GroupRepresentation,
-        flatten_group_hierarchy: bool,
         parent_group: Option<&LdapEntry>,
         known_users: &mut HashMap<String, LdapEntry>,
         all_group_associated_users: &[keycloak::types::UserRepresentation],
     ) -> LdapEntry {
         let mut parent_group_dn = None;
-        let mut parent_group_name = None;
+        let mut parent_group_full_name = None;
         if let Some(group) = parent_group {
-            if flatten_group_hierarchy {
-                // In this case, the group hierarchy is only retained in the display name of the group.
-
-                // This looks a bit hacky, but as long as we ensure that the ldap entry we put into this method
-                // is actually a group, we can safely do this due to the way we construct group entries below.
-                parent_group_name = group.get_attribute("cn").unwrap().first().map(String::as_str)
-            } else {
-                // In this case, the group hierarchy is properly retained in the LDAP tree.
-                parent_group_dn = Some(group.dn.as_str());
-            }
+            parent_group_full_name = group.get_attribute("fullName").unwrap().first().map(String::as_str);
+            parent_group_dn = Some(group.dn.as_str());
         }
 
         let mut entry = LdapEntry::new(
             self.group_dn(group.id.as_ref().unwrap(), parent_group_dn),
             vec![PRIMARY_GROUP_OBJECT_CLASS.to_string()],
         );
-        entry.set_attribute("cn", vec![self.group_name(group.name.as_ref().unwrap().as_str(), parent_group_name)]);
         entry.set_attribute("ou", vec![group.id.unwrap()]);
+        let raw_group_name = group.name.as_ref().unwrap().as_str();
+        entry.set_attribute("cn", vec![self.full_group_name(raw_group_name, None)]);
+        entry.set_attribute("fullName", vec![self.full_group_name(raw_group_name, parent_group_full_name)]);
 
         // See which of the users associated to the group are actually known to us.
         let mut group_members = vec![];

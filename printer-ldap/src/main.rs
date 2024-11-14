@@ -33,5 +33,5 @@ impl entry::KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server(Box::new(PrinterUserAttributeExtractor {}), false, false).await
+    server::start_ldap_server(Box::new(PrinterUserAttributeExtractor {}), false).await
 }

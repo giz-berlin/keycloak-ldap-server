@@ -36,7 +36,7 @@ As the LDAP library will handle argument parsing and logging, your main function
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let include_group_info = true;
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info, flatten_group_hierarchy).await
+    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info).await
 }
 ```
 
