@@ -36,30 +36,48 @@ async fn main() -> anyhow::Result<()> {
 
 See [the printer-specific implementation](printer-ldap) for an example.
 
-## Building
-
-First, the software needs to be build:
-
-```bash
-cargo build --release
-```
-
-It is important to build the release version for production as the performance is significantly better when using the release build.
+In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
 
 ### Running the API
 
 This API is designed to only run via TLS (LDAPS). Therefore, you will need to generate a server certificate.
 
-For testing purposes, this can be done by running `openssl req -x509 -newkey rsa:4096 -nodes -keyout ldap_keycloak_bridge.key.pem -out ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"`.
-For production, you should request a certificate for example using [LetsEncrypt](https://letsencrypt.org/).
+For testing purposes, this can be done by running (note that the `certificates` folder is the target location)
 
-The API can be started by running
-
-```bash
-target/release/{target_binary}
+```shell
+openssl req -x509 -newkey rsa:4096 -nodes \
+    -keyout certificates/ldap_keycloak_bridge.key.pem \
+    -out certificates/ldap_keycloak_bridge.crt.pem \
+    -subj "/C=DE/CN=127.0.0.1"
 ```
 
-where `target_binary` is one of the use-case specific binaries build, for example `printer-ldap`.
+For production, you should request a certificate for example using [LetsEncrypt](https://letsencrypt.org/).
+
+This repository contains multiple use-case specific binaries, for example `printer-ldap`.
+
+You can start the API using one of the following ways.
+Substitute `{target_binary}` with the name of the use-case specific binary you want to run.
+
+- **Using the official Docker image**:
+
+    ```shell
+    docker run --init -it --rm -p 0.0.0.0:3000:3000 -v ./certificates:/certificates --name ldap-server \
+        dr.rechenknecht.net/giz/keycloak/keycloak-ldap-server/main/{target_binary}:latest
+    ```
+
+- **Building the binary locally**:
+
+  ```shell
+  cargo build --release
+  ```
+
+  It is important to build the release version for production as the performance is significantly better when using the release build.
+
+  You can now run the binary with
+
+  ```shell
+  target/release/{target_binary}
+  ```
 
 The API should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, use the `--help` flag.
 
@@ -72,7 +90,7 @@ By default, the API expects to be pointed at a local Keycloak instance that can 
 
 The API can be tested manually using [Apache Directory Studio](https://directory.apache.org/studio/). You can also perform LDAP requests via the command line using the `ldapsearch` utility. Example:
 
-```bash
+```shell
 LDAPTLS_CACERT=ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +
 ```
 

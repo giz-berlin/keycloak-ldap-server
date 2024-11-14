@@ -3,6 +3,7 @@ image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/rust:1
 stages:
   - build
   - test
+  - pack
 
 build:
   stage: build
@@ -65,10 +66,29 @@ e2e-test:
         - '/bin/bash'
   before_script:
     - apt update && apt install -y ldap-utils
-    - openssl req -x509 -newkey rsa:4096 -nodes -keyout ldap_keycloak_bridge.key.pem -out ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
+    - openssl req -x509 -newkey rsa:4096 -nodes -keyout certificates/ldap_keycloak_bridge.key.pem -out certificates/ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
   script:
     - target/release/printer-ldap --keycloak-address "http://keycloak:8080"  &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
-    - LDAPTLS_CACERT=ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
+    - LDAPTLS_CACERT=certificates/ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
     - grep 'dc=giz,dc=berlin' ldap_result.txt
+
+docker-image:
+  stage: pack
+  image:
+    name: gcr.io/kaniko-project/executor:v1.15.0-debug
+    entrypoint: [ "" ]
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - |+
+      build() {
+        TARGET_BINARY=$1
+        IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$TARGET_BINARY
+        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+          --build-arg "BINARY=$TARGET_BINARY" \
+          --destination "$IMAGE_NAME:latest" --destination "$IMAGE_NAME:$CI_PIPELINE_IID"
+      }
+    - build printer-ldap
