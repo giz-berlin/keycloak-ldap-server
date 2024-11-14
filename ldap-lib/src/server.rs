@@ -12,6 +12,7 @@ use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use ldap3_proto::{LdapCodec, LdapResultCode};
 use openssl::ssl::{Ssl, SslAcceptor};
+use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 use crate::{entry, keycloak_service_account, proto, server, tls};
@@ -33,15 +34,23 @@ struct CliArguments {
 
     #[clap(
         long,
+        default_value = "false",
+        default_missing_value = "true",
+        help = "Whether this server is running via LDAPS or LDAP"
+    )]
+    disable_ldaps: bool,
+
+    #[clap(
+        long,
         default_value = "certificates/ldap_keycloak_bridge.crt.pem",
-        help = "The TLS certificate used by the LDAP server"
+        help = "The TLS certificate used by the LDAP server if LDAPS is enabled"
     )]
     certificate: String,
 
     #[clap(
         long,
         default_value = "certificates/ldap_keycloak_bridge.key.pem",
-        help = "The TLS certificate private key of the LDAP server"
+        help = "The TLS certificate private key used by the LDAP server if LDAPS is enabled"
     )]
     certificate_key: String,
 
@@ -99,9 +108,17 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
         .with_utc_timestamps()
         .init()?;
 
-    let ssl_acceptor = tls::setup_tls(std::path::PathBuf::from(args.certificate), std::path::PathBuf::from(args.certificate_key))?;
+    let ssl_acceptor = if !args.disable_ldaps {
+        log::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
+        Some(tls::setup_tls(
+            std::path::PathBuf::from(args.certificate),
+            std::path::PathBuf::from(args.certificate_key),
+        )?)
+    } else {
+        log::info!("Starting LDAP interface ldap://{} ...", args.bind_addr);
+        None
+    };
 
-    log::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
     let handler = Arc::from(proto::LdapHandler::new(
@@ -126,31 +143,41 @@ pub async fn start_ldap_server(user_attribute_extractor: Box<dyn entry::Keycloak
 
 /// Initiate an LDAP session. Will capture any errors that occur while handling the session and
 /// convert them into log messages.
-async fn client_session(ldap: Arc<proto::LdapHandler>, tcpstream: tokio::net::TcpStream, tls_acceptor: SslAcceptor, client_address: net::SocketAddr) {
+/// If a TLS acceptor has been passed in, interpret the TcpStream as a SslStream.
+/// Else, just use it as an unencrypted stream.
+async fn client_session(
+    ldap: Arc<proto::LdapHandler>,
+    tcp_stream: tokio::net::TcpStream,
+    ssl_acceptor: Option<SslAcceptor>,
+    client_address: net::SocketAddr,
+) -> anyhow::Result<()> {
     let mut session = LdapClientSession::new();
     log::info!("Starting new client session {}", session);
-    if let Err(e) = _client_session(&mut session, ldap, tcpstream, tls_acceptor, client_address).await {
+    let err = if let Some(acceptor) = ssl_acceptor {
+        let mut ssl_stream = Ssl::new(acceptor.context())
+            .and_then(|tls_obj| tokio_openssl::SslStream::new(tls_obj, tcp_stream))
+            .context("Cannot setup SSL stream")?;
+        tokio_openssl::SslStream::accept(Pin::new(&mut ssl_stream))
+            .await
+            .context("Cannot accept SSL stream")?;
+        _client_session(&mut session, ldap, ssl_stream, client_address).await
+    } else {
+        _client_session(&mut session, ldap, tcp_stream, client_address).await
+    };
+    if let Err(e) = err {
         log::error!("An error occurred while handling client session {}: {:?}", session.id, e);
     }
     log::info!("Closing client session {}", session);
+    // If an error occurred above, this session died, but the server as a whole does not need to care.
+    Ok(())
 }
 
 /// Handle receiving and sending of LDAP messages for a client session.
-async fn _client_session(
-    session: &mut LdapClientSession,
-    ldap: Arc<proto::LdapHandler>,
-    tcpstream: tokio::net::TcpStream,
-    tls_acceptor: SslAcceptor,
-    client_address: net::SocketAddr,
-) -> anyhow::Result<()> {
-    let mut tlsstream = Ssl::new(tls_acceptor.context())
-        .and_then(|tls_obj| tokio_openssl::SslStream::new(tls_obj, tcpstream))
-        .context("Cannot setup SSL stream")?;
-    tokio_openssl::SslStream::accept(Pin::new(&mut tlsstream))
-        .await
-        .context("Cannot accept SSL stream")?;
-
-    let (r, w) = tokio::io::split(tlsstream);
+async fn _client_session<T>(session: &mut LdapClientSession, ldap: Arc<proto::LdapHandler>, stream: T, client_address: net::SocketAddr) -> anyhow::Result<()>
+where
+    T: AsyncRead + AsyncWrite,
+{
+    let (r, w) = tokio::io::split(stream);
     let mut ldap_reader = tokio_util::codec::FramedRead::new(r, LdapCodec::default());
     let mut ldap_writer = tokio_util::codec::FramedWrite::new(w, LdapCodec::default());
 

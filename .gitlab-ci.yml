@@ -37,7 +37,7 @@ test:
     - cargo test
   needs: []
 
-e2e-test:
+.e2e-test:
   stage: test
   needs:
     - job: build
@@ -66,12 +66,24 @@ e2e-test:
         - '/bin/bash'
   before_script:
     - apt update && apt install -y ldap-utils
-    - openssl req -x509 -newkey rsa:4096 -nodes -keyout certificates/ldap_keycloak_bridge.key.pem -out certificates/ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
+
+e2e-test-ldaps:
+  extends: .e2e-test
   script:
-    - target/release/printer-ldap --keycloak-address "http://keycloak:8080"  &
+    - openssl req -x509 -newkey rsa:4096 -nodes -keyout certificates/ldap_keycloak_bridge.key.pem -out certificates/ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
+    - target/release/printer-ldap --keycloak-address "http://keycloak:8080" &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
     - LDAPTLS_CACERT=certificates/ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
+    - grep 'dc=giz,dc=berlin' ldap_result.txt
+
+e2e-test-ldap:
+  extends: .e2e-test
+  script:
+    - target/release/printer-ldap --keycloak-address "http://keycloak:8080" --disable-ldaps &
+    # Wait for server to start. This is not the cleanest solution, but should be good enough here
+    - sleep 1
+    - ldapsearch -H ldap://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
     - grep 'dc=giz,dc=berlin' ldap_result.txt
 
 docker-image:

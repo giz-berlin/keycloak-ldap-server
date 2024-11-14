@@ -40,7 +40,7 @@ In order to build a docker container for your new use-case binary, modify the `p
 
 ### Running the API
 
-This API is designed to only run via TLS (LDAPS). Therefore, you will need to generate a server certificate.
+This API can run with or without TLS (LDAPS), depending on whether `disable-ldaps` is configured. If you want to run it via TLS, you will need to generate a server certificate.
 
 For testing purposes, this can be done by running (note that the `certificates` folder is the target location)
 
