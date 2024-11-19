@@ -15,7 +15,7 @@ use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{cache, entry, keycloak_service_account, proto, server, tls};
+use crate::{caching, entry, keycloak_service_account, proto, server, tls};
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
@@ -148,7 +148,7 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttri
 
     let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let cache_configuration = cache::CacheConfiguration {
+    let cache_configuration = caching::configuration::Configuration {
         keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
         num_users_to_fetch: args.num_users,
         include_group_info,
@@ -156,7 +156,7 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttri
         max_entry_inactive_time: time::Duration::from_secs(args.cache_entry_max_inactive_secs),
         ldap_entry_builder: entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, attribute_extractor),
     };
-    let cache_registry = cache::CacheRegistry::new(cache_configuration, cache::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
+    let cache_registry = caching::registry::Registry::new(cache_configuration, caching::registry::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
     let handler = Arc::from(proto::LdapHandler::new(cache_registry));
 
     loop {

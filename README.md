@@ -13,7 +13,7 @@ Note that the API does only support read operations and offers a limited subset 
 
 This projects implements caching to vastly reduce the number of required Keycloak queries. For this reason, it may take a couple of seconds before changes in the Keycloak become visible through our API (how long exactly depends on how the bridge is configured).
 
-WARNING: Due to caching, when changing the credentials of a client in the keycloak, the old password will still be accepted until the cache entry is refreshed, see [`ClientCache::check_password` in `cache.rs`](ldap-lib/src/cache.rs). Remember to restart the server or wait the specified refresh interval before using the new password.
+WARNING: Due to caching, when changing the credentials of a client in the keycloak, the old password will still be accepted until the cache entry is refreshed, see [`KeycloakClientLdapCache::check_password` in `cache.rs`](ldap-lib/src/caching/cache.rs). Remember to restart the server or wait the specified refresh interval before using the new password.
 
 ## Use Cases
 
