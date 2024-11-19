@@ -292,11 +292,16 @@ impl LdapEntry {
         if let Some(attr) = requested_attributes.iter().find(|attr| attr.to_lowercase() == "hassubordinates") {
             result.attributes.push(LdapPartialAttribute {
                 atype: attr.to_string(), // We ensure to retain the casing specified by the client.
-                vals: vec![(!self.subordinates.is_empty()).to_string().into_bytes()],
+                vals: vec![self.has_subordinates().to_string().into_bytes()],
             });
         }
 
         result
+    }
+
+    /// Checks whether this entry has at least one subordinate.
+    pub fn has_subordinates(&self) -> bool {
+        !self.subordinates.is_empty()
     }
 
     /// Check whether this entry matches the filter the client specified in its search.

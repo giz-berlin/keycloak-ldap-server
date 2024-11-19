@@ -149,17 +149,30 @@ mod client {
 
     /// A mock for our service account client. Used to test that our library deals with the information provided by keycloak directly
     /// without having to have an actual keycloak instance running.
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     pub struct MockServiceAccountClient {
         pub user_ids: Vec<&'static str>,
         pub groups: HashMap<&'static str, Vec<usize>>,
-        pub err_code: Option<LdapResultCode>,
+        pub err_code: Mutex<Option<LdapResultCode>>,
+        pub call_count: Mutex<u64>,
     }
 
     static MOCK_TEST_PIN_MUTEX: Mutex<()> = Mutex::new(());
     // Normally, we cannot reassign static values. Using a mutex allows us to do so by swapping out the internal
     // mutex value.
     static MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON: Mutex<Option<MockServiceAccountClient>> = Mutex::new(None);
+
+    // If another test fails with a panic, it might fail to unlock the mutex, which
+    // then becomes poisoned.
+    // However, we don't care, as at that point, the mutex is effectively unlocked.
+    macro_rules! lock_ignoring_poison {
+        ($mutex:expr) => {
+            match $mutex.lock() {
+                Ok(guard) => guard,
+                Err(poison) => poison.into_inner(),
+            }
+        };
+    }
 
     impl MockServiceAccountClient {
         /// Sets a mock instance to be returned during a test when a ServiceAccountClient is constructed.
@@ -169,14 +182,8 @@ mod client {
             // and each test always gets to see the client instance it has configured,
             // Note that we need a second mutex for that, because returning the MutexGuard of the singleton
             // mutex instead would prevent us from actually providing the instance to the client builder.
-            let guard = match MOCK_TEST_PIN_MUTEX.lock() {
-                Ok(guard) => guard,
-                // If another test fails with a panic, it might fail to unlock the mutex, which
-                // then becomes poisoned.
-                // However, we don't care, as at that point, the mutex is effectively unlocked.
-                Err(poison) => poison.into_inner(),
-            };
-            _ = MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON.lock().unwrap().insert(instance);
+            let guard = lock_ignoring_poison!(MOCK_TEST_PIN_MUTEX);
+            _ = lock_ignoring_poison!(MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON).insert(instance);
             guard
         }
 
@@ -184,7 +191,8 @@ mod client {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids: vec![],
                 groups: HashMap::new(),
-                err_code: None,
+                err_code: Mutex::new(None),
+                call_count: Mutex::new(0),
             })
         }
 
@@ -192,7 +200,8 @@ mod client {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids,
                 groups: HashMap::new(),
-                err_code: None,
+                err_code: Mutex::new(None),
+                call_count: Mutex::new(0),
             })
         }
 
@@ -200,7 +209,8 @@ mod client {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids,
                 groups: groups.into_iter().collect(),
-                err_code: None,
+                err_code: Mutex::new(None),
+                call_count: Mutex::new(0),
             })
         }
 
@@ -208,7 +218,8 @@ mod client {
             Self::set_singleton_instance(MockServiceAccountClient {
                 user_ids: vec![],
                 groups: HashMap::new(),
-                err_code: Some(err_code),
+                err_code: Mutex::new(Some(err_code)),
+                call_count: Mutex::new(0),
             })
         }
     }
@@ -218,15 +229,24 @@ mod client {
         pub fn new(_: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>, _: String) -> Self {
             // Take out the instance we configured earlier. Will take ownership of this instance, which means
             // this method may only be called once before we have to configure a new instance.
-            // Luckily, once instance is all we need for the tests.
-            MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON.lock().unwrap().take().unwrap()
+            // Luckily, one instance is all we need for the tests.
+            lock_ignoring_poison!(MOCK_SERVICE_ACCOUNT_CLIENT_SINGLETON).take().unwrap()
+        }
+
+        pub fn call_count(&self) -> u64 {
+            *lock_ignoring_poison!(self.call_count)
+        }
+
+        pub fn change_err(&self, code: LdapResultCode) {
+            _ = lock_ignoring_poison!(self.err_code).insert(code);
         }
 
         pub async fn query_users(&self, _size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            if let Some(err_code) = self.err_code.as_ref() {
+            if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
+            *lock_ignoring_poison!(self.call_count) += 1;
             Ok(self
                 .user_ids
                 .iter()
@@ -238,10 +258,11 @@ mod client {
         }
 
         pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
-            if let Some(err_code) = self.err_code.as_ref() {
+            if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
+            *lock_ignoring_poison!(self.call_count) += 1;
             Ok(self
                 .groups
                 .iter()
@@ -260,10 +281,11 @@ mod client {
         }
 
         pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            if let Some(err_code) = self.err_code.as_ref() {
+            if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
 
+            *lock_ignoring_poison!(self.call_count) += 1;
             Ok(self
                 .groups
                 .get(group_id)
