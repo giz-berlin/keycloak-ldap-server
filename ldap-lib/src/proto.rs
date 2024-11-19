@@ -128,7 +128,7 @@ pub mod tests {
         entry::LdapEntryBuilder::new(
             test_constants::DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             test_constants::DEFAULT_ORGANIZATION_NAME.to_string(),
-            Box::new(entry::tests::DummyExtractor {}),
+            Box::new(entry::test_util::DummyExtractor {}),
         )
     }
 
