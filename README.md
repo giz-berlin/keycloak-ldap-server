@@ -21,7 +21,7 @@ Currently, this service is intended to provide the following use cases:
 
 - [implemented] providing a list of E-Mail addresses to printers
 - providing an address book, for example to mail clients
-- informing the NextCloud about active users, so that deactivated users can be removed
+- [implemented] informing the NextCloud about active users, so that deactivated users can be removed
 - informing the locking system about user roles/group memberships
 
 ### Creating a binary for a new use case
