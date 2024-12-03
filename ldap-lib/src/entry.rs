@@ -12,22 +12,28 @@ const FILTER_MAX_ELEMENTS: usize = 10;
 pub const PRIMARY_USER_OBJECT_CLASS: &str = "inetOrgPerson";
 pub const PRIMARY_GROUP_OBJECT_CLASS: &str = "groupOfUniqueNames";
 
-/// An interface for customizing which attributes of a Keycloak user should be added to the
+/// An interface for customizing which attributes of a Keycloak entity should be added to the
 /// corresponding LDAP entry.
 // Trait bound in order to pass impls to async functions
-pub trait KeycloakUserAttributeExtractor: Send + Sync {
+pub trait KeycloakAttributeExtractor: Send + Sync {
     /// Add the desired user attributes to the keycloak entry.
-    fn extract(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
+    fn extract_user(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut LdapEntry) -> anyhow::Result<()>;
+
+    /// Add the desired group attributes to the keycloak entry.
+    fn extract_group(&self, _group: keycloak::types::GroupRepresentation, _ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
+        // Provide a default implementation here as not all clients want to deal with groups.
+        Ok(())
+    }
 }
 
 pub(crate) struct LdapEntryBuilder {
     base_distinguished_name: String,
     organization_name: String,
-    extractor: Box<dyn KeycloakUserAttributeExtractor>,
+    extractor: Box<dyn KeycloakAttributeExtractor>,
 }
 
 impl LdapEntryBuilder {
-    pub fn new(base_distinguished_name: String, organization_name: String, extractor: Box<dyn KeycloakUserAttributeExtractor>) -> Self {
+    pub fn new(base_distinguished_name: String, organization_name: String, extractor: Box<dyn KeycloakAttributeExtractor>) -> Self {
         Self {
             base_distinguished_name,
             organization_name,
@@ -94,7 +100,7 @@ impl LdapEntryBuilder {
         // No matter the extractor, the LDAP specification says that we need to have an
         // attribute matching the identifier used in the dsn
         entry.set_attribute("cn", vec![user.id.clone()?]);
-        self.extractor.extract(user, &mut entry).ok()?;
+        self.extractor.extract_user(user, &mut entry).ok()?;
 
         Some(entry)
     }
@@ -144,7 +150,7 @@ impl LdapEntryBuilder {
             self.group_dn(group.id.as_ref().unwrap(), parent_group_dn),
             vec![PRIMARY_GROUP_OBJECT_CLASS.to_string()],
         );
-        entry.set_attribute("ou", vec![group.id.unwrap()]);
+        entry.set_attribute("ou", vec![group.id.clone().unwrap()]);
         let raw_group_name = group.name.as_ref().unwrap().as_str();
         entry.set_attribute("cn", vec![self.full_group_name(raw_group_name, None)]);
         entry.set_attribute("fullName", vec![self.full_group_name(raw_group_name, parent_group_full_name)]);
@@ -162,6 +168,11 @@ impl LdapEntryBuilder {
             }
         }
         entry.set_attribute("uniqueMember", group_members);
+
+        // Add custom fields
+        if let Err(e) = self.extractor.extract_group(group, &mut entry) {
+            log::warn!("Adding custom attributes to group {} failed: {}", entry.dn, e);
+        }
 
         entry
     }
@@ -784,8 +795,8 @@ pub mod tests {
 
     pub struct DummyExtractor;
 
-    impl KeycloakUserAttributeExtractor for DummyExtractor {
-        fn extract(&self, _user: UserRepresentation, _ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
+    impl KeycloakAttributeExtractor for DummyExtractor {
+        fn extract_user(&self, _user: UserRepresentation, _ldap_entry: &mut LdapEntry) -> anyhow::Result<()> {
             Ok(())
         }
     }

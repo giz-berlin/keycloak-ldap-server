@@ -7,8 +7,8 @@ use keycloak::types::UserRepresentation;
 
 pub struct PrinterUserAttributeExtractor;
 
-impl entry::KeycloakUserAttributeExtractor for PrinterUserAttributeExtractor {
-    fn extract(&self, user: UserRepresentation, ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
+impl entry::KeycloakAttributeExtractor for PrinterUserAttributeExtractor {
+    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("displayName", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
         ldap_entry.set_attribute(
