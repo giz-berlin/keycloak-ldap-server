@@ -268,6 +268,7 @@ pub mod tests {
     }
 
     mod when_search {
+        use keycloak_service_account::client::TestGroup;
         use ldap3_proto::{proto::LdapResult, LdapFilter, LdapSearchScope};
 
         use super::*;
@@ -282,6 +283,7 @@ pub mod tests {
                     "objectclass".to_string(),
                     "cn".to_string(),
                     "ou".to_string(),
+                    "fullName".to_string(),
                     "uniqueMember".to_string(),
                     "memberOf".to_string(),
                 ],
@@ -495,7 +497,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -523,7 +525,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -551,7 +553,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -580,7 +582,7 @@ pub mod tests {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
-                    vec![(test_constants::DEFAULT_GROUP_ID, vec![0])],
+                    vec![TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0])],
                 );
                 let client_session = client_session(true);
                 let ldap_handler = LdapHandler::new(cache_registry.await);
@@ -610,8 +612,8 @@ pub mod tests {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID, test_constants::ANOTHER_USER_ID],
                     vec![
-                        (test_constants::DEFAULT_GROUP_ID, vec![0]),
-                        (test_constants::ANOTHER_GROUP_ID, vec![1]),
+                        TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0]),
+                        TestGroup::new(test_constants::ANOTHER_GROUP_ID, vec![1]),
                     ],
                 );
                 let client_session = client_session(true);
@@ -646,8 +648,8 @@ pub mod tests {
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID, test_constants::ANOTHER_USER_ID],
                     vec![
-                        (test_constants::DEFAULT_GROUP_ID, vec![0]),
-                        (test_constants::ANOTHER_GROUP_ID, vec![1]),
+                        TestGroup::new(test_constants::DEFAULT_GROUP_ID, vec![0]),
+                        TestGroup::new(test_constants::ANOTHER_GROUP_ID, vec![1]),
                     ],
                 );
                 let client_session = client_session(true);
@@ -665,8 +667,80 @@ pub mod tests {
                 // then
                 assert_search_result_contains_exactly_entries_satisfying!(
                     search_result, LdapResultCode::Success,
-                    "memberOf" => ldap_entry_builder.group_dn(test_constants::DEFAULT_GROUP_ID),
-                    "memberOf" => ldap_entry_builder.group_dn(test_constants::ANOTHER_GROUP_ID)
+                    "memberOf" => ldap_entry_builder.group_dn(test_constants::DEFAULT_GROUP_ID, None),
+                    "memberOf" => ldap_entry_builder.group_dn(test_constants::ANOTHER_GROUP_ID, None)
+                );
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_return_subgroups(
+                #[future]
+                #[with(true, true)]
+                cache_registry: Arc<cache::CacheRegistry>,
+                ldap_entry_builder: entry::LdapEntryBuilder,
+            ) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
+                    vec![],
+                    vec![TestGroup::with_subgroups(
+                        test_constants::DEFAULT_GROUP_ID,
+                        vec![TestGroup::new(test_constants::ANOTHER_GROUP_ID, vec![])],
+                    )],
+                );
+                let client_session = client_session(true);
+                let ldap_handler = LdapHandler::new(cache_registry.await);
+
+                let search_request = search_request(test_constants::DEFAULT_BASE_DISTINGUISHED_NAME, LdapSearchScope::Children, None);
+
+                // when
+                let search_result = ldap_handler.perform_ldap_operation(search_request.clone(), &client_session).await;
+
+                // then
+                assert_search_result_contains_exactly_entries_satisfying!(
+                    search_result, LdapResultCode::Success,
+                    "cn" => ldap_entry_builder.full_group_name(&TestGroup::group_name(test_constants::DEFAULT_GROUP_ID), None),
+                    // Note the compound group name!
+                    "fullName" => ldap_entry_builder.full_group_name(&TestGroup::group_name(test_constants::ANOTHER_GROUP_ID), Some(&TestGroup::group_name(test_constants::DEFAULT_GROUP_ID)))
+                );
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn then_build_full_subgroup_hierarchy(
+                #[future]
+                #[with(true, true)]
+                cache_registry: Arc<cache::CacheRegistry>,
+                ldap_entry_builder: entry::LdapEntryBuilder,
+            ) {
+                // given
+                let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
+                    vec![],
+                    vec![TestGroup::with_subgroups(
+                        test_constants::DEFAULT_GROUP_ID,
+                        vec![TestGroup::with_subgroups(
+                            test_constants::ANOTHER_GROUP_ID,
+                            vec![TestGroup::new("third-group", vec![])],
+                        )],
+                    )],
+                );
+                let client_session = client_session(true);
+                let ldap_handler = LdapHandler::new(cache_registry.await);
+
+                let search_request = search_request(
+                    ldap_entry_builder.group_dn(test_constants::DEFAULT_GROUP_ID, None).as_str(),
+                    LdapSearchScope::OneLevel,
+                    None,
+                );
+
+                // when
+                let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
+
+                // then
+                // should only contain ANOTHER_GROUP as we are only searching for ONE_LEVEL below DEFAULT_GROUP
+                assert_search_result_contains_exactly_entries_satisfying!(
+                    search_result, LdapResultCode::Success,
+                    "cn" => ldap_entry_builder.full_group_name(&TestGroup::group_name(test_constants::ANOTHER_GROUP_ID), None)
                 );
             }
         }

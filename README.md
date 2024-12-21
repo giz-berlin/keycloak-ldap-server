@@ -42,6 +42,9 @@ async fn main() -> anyhow::Result<()> {
 
 See [the printer-specific implementation](printer-ldap) for an example.
 
+NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`), 
+this service REPLACES all `/` characters in a group name with `_`.
+
 In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
 
 ### Running the API
