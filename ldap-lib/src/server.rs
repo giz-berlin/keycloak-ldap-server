@@ -15,7 +15,7 @@ use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{caching, entry, keycloak_service_account, proto, server, tls};
+use crate::{caching, dto, keycloak_service_account, proto, server, tls};
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
@@ -121,11 +121,11 @@ impl Display for LdapClientSession {
 /// is expected to NOT do itself.
 ///
 /// As the concrete user and group information needed depends on the specific use case,
-/// this method accepts a [entry::KeycloakAttributeExtractor] implementation used to populate
+/// this method accepts a [dto::KeycloakAttributeExtractor] implementation used to populate
 /// the LDAP entries.
 ///
 /// This method also allows configuring whether group information should be provided as well.
-pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttributeExtractor>, include_group_info: bool) -> anyhow::Result<()> {
+pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttributeExtractor>, include_group_info: bool) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
     tracing_subscriber::fmt()
@@ -161,7 +161,7 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttri
         include_group_info,
         cache_update_interval: time::Duration::from_secs(args.cache_update_interval_secs),
         max_entry_inactive_time: time::Duration::from_secs(args.cache_entry_max_inactive_secs),
-        ldap_entry_builder: entry::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, attribute_extractor),
+        ldap_entry_builder: dto::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, attribute_extractor),
     };
     let cache_registry = caching::registry::Registry::new(cache_configuration, caching::registry::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
     let handler = Arc::from(proto::LdapHandler::new(cache_registry));

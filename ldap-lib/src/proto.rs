@@ -121,14 +121,14 @@ pub mod tests {
     use rstest::*;
 
     use super::*;
-    use crate::{entry, keycloak_service_account, test_util::test_constants};
+    use crate::{dto, keycloak_service_account, test_util::test_constants};
 
     #[fixture]
-    pub fn ldap_entry_builder() -> entry::LdapEntryBuilder {
-        entry::LdapEntryBuilder::new(
+    pub fn ldap_entry_builder() -> dto::LdapEntryBuilder {
+        dto::LdapEntryBuilder::new(
             test_constants::DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             test_constants::DEFAULT_ORGANIZATION_NAME.to_string(),
-            Box::new(entry::test_util::DummyExtractor {}),
+            Box::new(dto::test_util::DummyExtractor {}),
         )
     }
 
@@ -136,7 +136,7 @@ pub mod tests {
     async fn cache_registry(
         #[default(true)] register_default_client: bool,
         #[default(false)] include_group_info: bool,
-        ldap_entry_builder: entry::LdapEntryBuilder,
+        ldap_entry_builder: dto::LdapEntryBuilder,
     ) -> Arc<caching::registry::Registry> {
         let cache = caching::registry::Registry::new(
             caching::configuration::Configuration {
@@ -454,7 +454,7 @@ pub mod tests {
         #[tokio::test]
         async fn specifically_for_entry__then_return_result(
             #[future] cache_registry: Arc<caching::registry::Registry>,
-            ldap_entry_builder: entry::LdapEntryBuilder,
+            ldap_entry_builder: dto::LdapEntryBuilder,
         ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_users(vec![test_constants::DEFAULT_USER_ID]);
@@ -565,7 +565,7 @@ pub mod tests {
                 let search_request = search_request(
                     test_constants::DEFAULT_BASE_DISTINGUISHED_NAME,
                     LdapSearchScope::Children,
-                    Some(LdapFilter::Equality("objectClass".to_string(), entry::PRIMARY_GROUP_OBJECT_CLASS.to_string())),
+                    Some(LdapFilter::Equality("objectClass".to_string(), dto::PRIMARY_GROUP_OBJECT_CLASS.to_string())),
                 );
 
                 let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
@@ -594,7 +594,7 @@ pub mod tests {
                 let search_request = search_request(
                     test_constants::DEFAULT_BASE_DISTINGUISHED_NAME,
                     LdapSearchScope::Children,
-                    Some(LdapFilter::Equality("objectClass".to_string(), entry::PRIMARY_USER_OBJECT_CLASS.to_string())),
+                    Some(LdapFilter::Equality("objectClass".to_string(), dto::PRIMARY_USER_OBJECT_CLASS.to_string())),
                 );
 
                 let search_result = ldap_handler.perform_ldap_operation(search_request, &client_session).await;
@@ -609,7 +609,7 @@ pub mod tests {
                 #[future]
                 #[with(true, true)]
                 cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: entry::LdapEntryBuilder,
+                ldap_entry_builder: dto::LdapEntryBuilder,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -645,7 +645,7 @@ pub mod tests {
                 #[future]
                 #[with(true, true)]
                 cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: entry::LdapEntryBuilder,
+                ldap_entry_builder: dto::LdapEntryBuilder,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -681,7 +681,7 @@ pub mod tests {
                 #[future]
                 #[with(true, true)]
                 cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: entry::LdapEntryBuilder,
+                ldap_entry_builder: dto::LdapEntryBuilder,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -714,7 +714,7 @@ pub mod tests {
                 #[future]
                 #[with(true, true)]
                 cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: entry::LdapEntryBuilder,
+                ldap_entry_builder: dto::LdapEntryBuilder,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(

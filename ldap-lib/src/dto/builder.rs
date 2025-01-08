@@ -1,6 +1,6 @@
 use std::{collections::HashMap, string::ToString};
 
-use crate::entry::entry;
+use crate::dto::entry;
 
 pub const PRIMARY_USER_OBJECT_CLASS: &str = "inetOrgPerson";
 pub const PRIMARY_GROUP_OBJECT_CLASS: &str = "groupOfUniqueNames";

@@ -1,6 +1,6 @@
 use std::time;
 
-use crate::{entry, keycloak_service_account};
+use crate::{dto, keycloak_service_account};
 
 /// Data class holding cache configuration values.
 pub struct Configuration {
@@ -9,5 +9,5 @@ pub struct Configuration {
     pub include_group_info: bool,
     pub cache_update_interval: time::Duration,
     pub max_entry_inactive_time: time::Duration,
-    pub ldap_entry_builder: entry::LdapEntryBuilder,
+    pub ldap_entry_builder: dto::LdapEntryBuilder,
 }

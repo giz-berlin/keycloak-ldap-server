@@ -28,7 +28,7 @@ Currently, this service is intended to provide the following use cases:
 
 To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
 and add it to the [workspace members](Cargo.toml).
-There, you should create a new implementation of the `giz-ldap-lib::entry::KeycloakAttributeExtractor` trait, which allows you to configure
+There, you should create a new implementation of the `giz-ldap-lib::dto::KeycloakAttributeExtractor` trait, which allows you to configure
 which Keycloak attributes will be exposed by the LDAP user and group entries.
 
 As the LDAP library will handle argument parsing and logging, your main function should simply look like this:

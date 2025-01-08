@@ -2,13 +2,13 @@
 #![deny(clippy::all)]
 
 use anyhow::Context;
-use giz_ldap_lib::{entry, server};
+use giz_ldap_lib::{dto, server};
 use keycloak::types::UserRepresentation;
 
 pub struct PrinterUserAttributeExtractor;
 
-impl entry::KeycloakAttributeExtractor for PrinterUserAttributeExtractor {
-    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
+impl dto::KeycloakAttributeExtractor for PrinterUserAttributeExtractor {
+    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("displayName", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
         ldap_entry.set_attribute(

@@ -2,7 +2,7 @@ use std::{sync::Arc, time};
 
 use ldap3_proto::{LdapResultCode, LdapSearchResultEntry, SearchRequest};
 
-use crate::{caching::configuration, entry, keycloak_service_account, proto};
+use crate::{caching::configuration, dto, keycloak_service_account, proto};
 
 /// A keycloak client LDAP registry keeps track of a set of user and (potentially) group information as visible to a certain keycloak client.
 /// The information is provided in form of an LDAP tree.
@@ -16,7 +16,7 @@ pub struct KeycloakClientLdapCache {
     password: String,
     service_account_client: keycloak_service_account::ServiceAccountClient,
     last_used: tokio::sync::RwLock<time::Instant>,
-    root: tokio::sync::RwLock<entry::LdapEntry>,
+    root: tokio::sync::RwLock<dto::LdapEntry>,
 }
 
 impl KeycloakClientLdapCache {
@@ -35,7 +35,7 @@ impl KeycloakClientLdapCache {
             password: password.to_owned(),
             service_account_client,
             last_used: tokio::sync::RwLock::new(time::Instant::now()),
-            root: tokio::sync::RwLock::new(entry::LdapEntry::new("".to_string(), vec![])),
+            root: tokio::sync::RwLock::new(dto::LdapEntry::new("".to_string(), vec![])),
         })
     }
 
@@ -90,7 +90,7 @@ impl KeycloakClientLdapCache {
         root.add_subordinate(self.configuration.ldap_entry_builder.subschema());
 
         let mut organization = self.configuration.ldap_entry_builder.organization();
-        let mut users: std::collections::HashMap<String, entry::LdapEntry> = self
+        let mut users: std::collections::HashMap<String, dto::LdapEntry> = self
             .service_account_client
             .query_users(self.configuration.num_users_to_fetch)
             .await?
@@ -119,9 +119,9 @@ impl KeycloakClientLdapCache {
     async fn fetch_group(
         &self,
         group: keycloak::types::GroupRepresentation,
-        parent_group: Option<&entry::LdapEntry>,
-        users: &mut std::collections::HashMap<String, entry::LdapEntry>,
-    ) -> Result<entry::LdapEntry, proto::LdapError> {
+        parent_group: Option<&dto::LdapEntry>,
+        users: &mut std::collections::HashMap<String, dto::LdapEntry>,
+    ) -> Result<dto::LdapEntry, proto::LdapError> {
         // We can unwrap here because we made sure to filter out groups without a id
         let group_id = group.id.as_ref().unwrap();
         let group_associated_users = self.service_account_client.query_users_in_group(group_id).await?;
