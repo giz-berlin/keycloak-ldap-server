@@ -156,7 +156,7 @@ impl LdapEntryBuilder {
                     user.append_to_attribute("memberOf", entry.dn.clone());
                     group_members.push(self.user_dn(id));
                 } else {
-                    log::warn!("Group {} contains user {}, but that user does not exist!", entry.dn, id);
+                    tracing::warn!(group = entry.dn, user = id, "Group contains user, but that user does not exist!");
                 }
             }
         }
@@ -164,7 +164,7 @@ impl LdapEntryBuilder {
 
         // Add custom fields
         if let Err(e) = self.extractor.extract_group(group, &mut entry) {
-            log::warn!("Adding custom attributes to group {} failed: {}", entry.dn, e);
+            tracing::warn!(group = entry.dn, error = %e, "Adding custom attributes to group failed");
         }
 
         entry

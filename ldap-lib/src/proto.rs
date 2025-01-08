@@ -42,7 +42,7 @@ impl LdapHandler {
                 .await
                 .map(|token| LdapResponseState::Bind(token, sbr.gen_success()))
                 .unwrap_or_else(|e| {
-                    log::error!("Session {}, msg {} || Error performing bind request: {:?}", session.id, sbr.msgid, e);
+                    tracing::error!(%session, msg = sbr.msgid, error = ?e, "Error performing bind request");
                     LdapResponseState::Respond(sbr.gen_error(e.0, e.1.to_string()))
                 }),
             ServerOps::Search(sr) => match &session.bind_info {
@@ -51,7 +51,7 @@ impl LdapHandler {
                     .await
                     .map(LdapResponseState::MultiPartRespond)
                     .unwrap_or_else(|e| {
-                        log::error!("Session {}, msg {} || Error performing search request: {:?}", session.id, sr.msgid, e);
+                        tracing::error!(%session, msg = sr.msgid, error = ?e, "Error performing search request");
                         if let LdapResultCode::InvalidCredentials = e.0 {
                             LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen(e.0, e.1.as_str()))
                         } else {
@@ -84,15 +84,15 @@ impl LdapHandler {
 
         match self.ldap_tree_cache.perform_ldap_bind_for_client(dn, pw).await {
             Ok(()) => {
-                log::info!("Session {} || LDAP Bind success for client {}", session_id, dn);
+                tracing::info!(session = %session_id, client = dn, "LDAP Bind success");
                 Ok(LdapBindInfo { client: dn.to_string() })
             }
             Err(LdapError(LdapResultCode::Unavailable, _)) => {
-                log::error!("Session {} || LDAP Bind failure, could not connect to keycloak", session_id);
+                tracing::error!(session = %session_id, "LDAP Bind failure, could not connect to keycloak");
                 Err(LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak".to_string()))
             }
             Err(e) => {
-                log::error!("Session {} || LDAP Bind failure, could not authenticate against keycloak, {:?}", session_id, e);
+                tracing::error!(session = %session_id, error = ?e, "LDAP Bind failure, could not authenticate against keycloak");
                 Err(LdapError(
                     LdapResultCode::InvalidCredentials,
                     "Could not authenticate against Keycloak".to_string(),
@@ -106,7 +106,7 @@ impl LdapHandler {
     async fn do_search(&self, session_id: &Uuid, sr: &SearchRequest, bound_user: &LdapBindInfo) -> Result<Vec<LdapMsg>, LdapError> {
         let client_cache = self.ldap_tree_cache.obtain_client_cache(bound_user.client.as_str()).await?;
         let search_results = client_cache.search(sr).await?;
-        log::debug!("Session {} || Search: Found {} ldap entries", session_id, search_results.len());
+        tracing::debug!(session = %session_id, "Search: Found {} ldap entries", search_results.len());
         let mut result_messages: Vec<LdapMsg> = search_results.into_iter().map(|r| sr.gen_result_entry(r)).collect();
         result_messages.push(sr.gen_success());
         Ok(result_messages)

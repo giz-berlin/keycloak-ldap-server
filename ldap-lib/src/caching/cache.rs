@@ -75,11 +75,11 @@ impl KeycloakClientLdapCache {
         // We will consume the handle now.
         let handle = container.take().unwrap();
         if !handle.is_finished() {
-            log::warn!("registry entry '{}': Destroying cache that is still active!", self.client);
+            tracing::warn!(client = self.client, "Destroying cache even though it was still active!");
             handle.abort();
         }
         if let Err(e) = handle.await {
-            log::warn!("registry entry '{}': Encountered error running update handler: {e}", self.client)
+            tracing::warn!(client = self.client, error = ?e, "Cache has encountered an error running update handler")
         }
     }
 
@@ -157,15 +157,14 @@ impl KeycloakClientLdapCache {
             tokio::time::sleep(self.configuration.cache_update_interval).await;
 
             if self.should_be_pruned().await {
-                // TODO: proper logging
-                log::info!("registry entry '{}': Terminating scheduled update due to pruning condition.", self.client);
+                tracing::info!(client = self.client, "Terminating scheduled update due to pruning condition.");
                 return;
             }
 
             if self.fetch().await.is_ok() {
-                log::debug!("registry entry '{}': Updated registry entry.", self.client);
+                tracing::debug!(client = self.client, "Updated client cache.");
             } else {
-                log::info!("registry entry '{}': Terminating scheduled update due to update failure.", self.client);
+                tracing::info!(client = self.client, "Terminating scheduled update due to update failure.");
                 return;
             }
         }

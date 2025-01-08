@@ -69,7 +69,7 @@ mod client {
                     Err(proto::LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak.".to_string()))
                 }
                 Err(e) => {
-                    log::error!("Could not fetch {} from keycloak: {:?}", resource_name, e);
+                    tracing::error!(error = ?e, "Could not fetch {} from keycloak", resource_name);
                     Err(proto::LdapError(
                         LdapResultCode::Other,
                         format!("Could not fetch {} from keycloak", resource_name),

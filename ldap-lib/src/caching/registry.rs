@@ -44,7 +44,7 @@ impl Registry {
                 }
             }
             for client in client_caches_to_evict {
-                log::info!("Evicting cache for client {} from registry", client);
+                tracing::info!(client, "Evicting cache for client from registry");
                 self._unregister_client_cache(&mut locked_store, client.as_str()).await;
             }
         }
@@ -83,7 +83,7 @@ impl Registry {
                 }
             }
 
-            log::info!("registry: Encountered new client '{client}', registering it");
+            tracing::info!(new_client = client, "Encountered new client, registering it");
             new_cache_entry = Arc::new(cache::KeycloakClientLdapCache::create(self.config.clone(), client, password).await?);
             locked_store.insert(client.to_string(), new_cache_entry.clone());
 

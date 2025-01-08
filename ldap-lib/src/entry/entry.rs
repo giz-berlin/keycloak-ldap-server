@@ -247,7 +247,7 @@ impl LdapEntry {
                 }
             }
             _ => {
-                log::error!("Unsupported filter operation");
+                tracing::error!("Unsupported filter operation");
                 Err(proto::LdapError(LdapResultCode::UnwillingToPerform, "Operation not implemented".to_string()))
             }
         }

@@ -28,15 +28,15 @@ Currently, this service is intended to provide the following use cases:
 
 To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
 and add it to the [workspace members](Cargo.toml).
-There, you should create a new implementation of the `giz-ldap-lib::search::KeycloakUserAttributeExtractor` trait, which allows you to configure
-which Keycloak user attributes will be exposed by the LDAP user entries.
+There, you should create a new implementation of the `giz-ldap-lib::entry::KeycloakAttributeExtractor` trait, which allows you to configure
+which Keycloak attributes will be exposed by the LDAP user and group entries.
 
 As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let include_group_info = true;
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakUserAttributeExtractor{}), include_group_info).await
+    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakAttributeExtractor{}), include_group_info).await
 }
 ```
 
@@ -92,6 +92,15 @@ The API should now be available at `ldaps://0.0.0.0:3000`. To see all available 
 
 If you want to run the API under the typical LDAPS port (636), you will need to have root permissions or
 [use some other way to bind to a privileged port](https://stackoverflow.com/questions/413807/is-there-a-way-for-non-root-processes-to-bind-to-privileged-ports-on-linux).
+
+### Logging configuration
+
+The default log level of this API is INFO, while log message of crates we depend on are shown starting with WARN.
+You can enable more verbose logging via the `-v` flag (DEBUG), or the `-vv` flag (TRACE).
+
+Additionally, you may configure the logging (for the whole API, certain submodules or dependencies)
+on a more granular level using the `RUST_LOG` environment variable 
+(see [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) for required syntax.)
 
 ### Manual testing
 

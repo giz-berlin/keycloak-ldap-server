@@ -128,21 +128,28 @@ impl Display for LdapClientSession {
 pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttributeExtractor>, include_group_info: bool) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Warn)
-        .with_module_level("giz_ldap_lib", args.log_level.log_level().unwrap().to_level_filter())
-        .env()
-        .with_utc_timestamps()
-        .init()?;
+    tracing_subscriber::fmt()
+        // Use configured log level for our library, and WARN for everything else.
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::Directive::from_str(
+                    ("giz_ldap_lib=".to_owned() + args.log_level.log_level().unwrap().as_str()).as_str(),
+                )?)
+                .from_env()?
+                .add_directive(tracing::Level::WARN.into()),
+        )
+        .with_file(true)
+        .with_line_number(true)
+        .init();
 
     let ssl_acceptor = if !args.disable_ldaps {
-        log::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
+        tracing::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
         Some(tls::setup_tls(
             std::path::PathBuf::from(args.certificate),
             std::path::PathBuf::from(args.certificate_key),
         )?)
     } else {
-        log::info!("Starting LDAP interface ldap://{} ...", args.bind_addr);
+        tracing::info!("Starting LDAP interface ldap://{} ...", args.bind_addr);
         None
     };
 
@@ -171,7 +178,7 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn entry::KeycloakAttri
                 ));
             }
             Err(e) => {
-                log::error!("TCP listener accept error, continuing -> {:?}", e);
+                tracing::error!(error = ?e, "TCP listener accept error, continuing");
             }
         }
     }
@@ -189,7 +196,7 @@ async fn client_session(
     delay_before_first_answer: time::Duration,
 ) -> anyhow::Result<()> {
     let mut session = LdapClientSession::new();
-    log::info!("Starting new client session {}", session);
+    tracing::info!(%session, "Starting new client session");
     let err = if let Some(acceptor) = ssl_acceptor {
         let mut ssl_stream = Ssl::new(acceptor.context())
             .and_then(|tls_obj| tokio_openssl::SslStream::new(tls_obj, tcp_stream))
@@ -202,9 +209,9 @@ async fn client_session(
         _client_session(&mut session, ldap, tcp_stream, client_address, delay_before_first_answer).await
     };
     if let Err(e) = err {
-        log::error!("An error occurred while handling client session {}: {:?}", session.id, e);
+        tracing::error!(%session, error = ?e, "An error occurred while handling client session");
     }
-    log::info!("Closing client session {}", session);
+    tracing::info!(%session, "Closing client session");
     // If an error occurred above, this session died, but the server as a whole does not need to care.
     Ok(())
 }
@@ -234,17 +241,17 @@ where
     }
 
     while let Some(Ok(protomsg)) = ldap_reader.next().await {
-        log::trace!(
-            "Session {:?} || Got message from {} {}: {:?}",
-            session,
-            client_address.ip(),
-            client_address.port(),
-            protomsg
+        tracing::trace!(
+            %session,
+            client_ip = %client_address.ip(),
+            client_port = client_address.port(),
+            msg = ?protomsg,
+            "Received protocol message"
         );
         let msg_id = protomsg.msgid;
         let operation_result = match ldap3_proto::ServerOps::try_from(protomsg) {
             Ok(server_op) => {
-                log::debug!("Session {}, msg {} || Performing operation {:?}", session, msg_id, server_op);
+                tracing::debug!(msg_id, %session, operation = ?server_op, "Performing LDAP operation");
                 ldap.perform_ldap_operation(server_op, session).await
             }
             Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen(
@@ -256,17 +263,17 @@ where
         match operation_result {
             proto::LdapResponseState::Bind(new_bind, return_message) => {
                 session.bind_info = Some(new_bind);
-                log::trace!("Session {:?} || Sending answer {:?}", session, return_message);
+                tracing::trace!(%session, ?return_message, "Sending protocol answer");
                 ldap_writer.send(return_message).await?;
             }
             proto::LdapResponseState::Unbind => break,
             proto::LdapResponseState::Respond(return_message) => {
-                log::trace!("Session {:?} || Sending answer {:?}", session, return_message);
+                tracing::trace!(%session, ?return_message, "Sending protocol answer");
                 ldap_writer.send(return_message).await?;
             }
             proto::LdapResponseState::MultiPartRespond(messages) => {
                 for return_message in messages.into_iter() {
-                    log::trace!("Session {:?} || Sending answer {:?}", session, return_message);
+                    tracing::trace!(%session, ?return_message, "Sending protocol answer");
                     ldap_writer.send(return_message).await?;
                 }
             }
