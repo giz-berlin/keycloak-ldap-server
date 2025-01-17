@@ -7,27 +7,25 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "~1.0.83"
-clap = "~4.5.4"
-clap-verbosity-flag = "~2.2.0"
-futures-util = { version = "~0.3.30", features = ["sink"] }
-keycloak = "~25.0.0"
-ldap3_proto = "~0.5.0"
-log = "~0.4.21"
-openssl = "~0.10.64"
-regex = "~1.10.4"
-reqwest = "~0.12.4"
-simple_logger = "~5.0.0"
-tokio = { version = "~1.38.0", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
-tokio-openssl = "~0.6.4"
-tokio-util = "~0.7.11"
-uuid = { version = "~1.8.0", features = ["v4"] }
+anyhow = "~1.0.95"
+clap = "~4.5.24"
+clap-verbosity-flag = "~3.0.2"
+futures-util = { version = "~0.3.31", features = ["sink"] }
+keycloak = "~25.0.400"
+ldap3_proto = "~0.5.2"
+openssl = "~0.10.68"
+regex = "~1.11.1"
+reqwest = "~0.12.12"
+tokio = { version = "~1.42.0", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
+tokio-openssl = "~0.6.5"
+tokio-util = "~0.7.13"
+uuid = { version = "~1.11.0", features = ["v4"] }
 mockall_double = "~0.3.1"
-itertools = "~0.13.0"
-url = "2.5.2"
+itertools = "0.14.0"
 rust-crypto = "0.2.36"
 async-recursion = "1.1.1"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [dev-dependencies]
-mockall = "~0.12.1"
-rstest = "~0.21.0"
+rstest = "~0.24.0"
