@@ -12,6 +12,7 @@ build:
   artifacts:
     paths:
       - target/release/printer-ldap
+      - target/release/nextcloud-ldap
     expire_in: 1 week
     when: always
   needs: []
@@ -104,3 +105,4 @@ docker-image:
           --destination "$IMAGE_NAME:latest" --destination "$IMAGE_NAME:$CI_PIPELINE_IID"
       }
     - build printer-ldap
+    - build nextcloud-ldap
