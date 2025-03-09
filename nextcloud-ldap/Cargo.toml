@@ -1,0 +1,11 @@
+[package]
+name = "nextcloud-ldap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "~1.0.95"
+giz-ldap-lib = { path="../ldap-lib" }
+keycloak = "~25.0.400"
+tokio = { version = "~1.42.0", features = ["io-util"] }
