@@ -13,6 +13,7 @@ build:
     paths:
       - target/release/printer-ldap
       - target/release/nextcloud-ldap
+      - target/release/roundcube-ldap
     expire_in: 1 week
     when: always
   needs: []
@@ -116,3 +117,4 @@ docker-image:
       }
     - build printer-ldap
     - build nextcloud-ldap
+    - build roundcube-ldap

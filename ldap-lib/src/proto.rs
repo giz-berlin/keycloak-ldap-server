@@ -107,6 +107,7 @@ impl LdapHandler {
         let client_cache = self.ldap_tree_cache.obtain_client_cache(bound_user.client.as_str()).await?;
         let search_results = client_cache.search(sr).await?;
         tracing::debug!(session = %session_id, "Search: Found {} ldap entries", search_results.len());
+        tracing::trace!(session = %session_id, "Search: Found these ldap entries: {:?}", search_results);
         let mut result_messages: Vec<LdapMsg> = search_results.into_iter().map(|r| sr.gen_result_entry(r)).collect();
         result_messages.push(sr.gen_success());
         Ok(result_messages)
