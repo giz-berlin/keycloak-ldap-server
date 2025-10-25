@@ -1,7 +1,7 @@
 [package]
 name = "giz-ldap-lib"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,7 +12,7 @@ clap = "~4.5.24"
 clap-verbosity-flag = "~3.0.2"
 futures-util = { version = "~0.3.31", features = ["sink"] }
 keycloak = "~25.0.400"
-ldap3_proto = "~0.5.2"
+ldap3_proto = "~0.6.2"
 openssl = "~0.10.68"
 regex = "~1.11.1"
 reqwest = "~0.12.12"

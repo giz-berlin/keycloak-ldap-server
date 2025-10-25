@@ -254,7 +254,7 @@ where
                 tracing::debug!(msg_id, %session, operation = ?server_op, "Performing LDAP operation");
                 ldap.perform_ldap_operation(server_op, session).await
             }
-            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen(
+            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(
                 LdapResultCode::ProtocolError,
                 format!("Invalid Request in session {}: msg {}", session.id, msg_id).as_str(),
             )),
