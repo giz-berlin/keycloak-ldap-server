@@ -98,10 +98,10 @@ impl Registry {
 
     /// Return the cache for the given client ID.
     pub async fn obtain_client_cache(&self, client: &str) -> Result<Arc<cache::KeycloakClientLdapCache>, proto::LdapError> {
-        if let Some(cache_entry) = self.per_client_ldap_trees.read().await.get(client) {
-            if cache_entry.is_active().await {
-                return Ok(cache_entry.clone());
-            }
+        if let Some(cache_entry) = self.per_client_ldap_trees.read().await.get(client)
+            && cache_entry.is_active().await
+        {
+            return Ok(cache_entry.clone());
         }
 
         Err(proto::LdapError(
@@ -261,14 +261,18 @@ mod test {
                     .expect("registering should succeed");
 
                 // when & then
-                assert!(registry
-                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
-                    .await
-                    .is_ok());
-                assert!(registry
-                    .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, "wrong-password")
-                    .await
-                    .is_err());
+                assert!(
+                    registry
+                        .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
+                        .await
+                        .is_ok()
+                );
+                assert!(
+                    registry
+                        .perform_ldap_bind_for_client(test_constants::DEFAULT_CLIENT_ID, "wrong-password")
+                        .await
+                        .is_err()
+                );
             }
         }
 

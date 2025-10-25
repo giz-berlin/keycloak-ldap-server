@@ -234,7 +234,7 @@ pub(crate) mod test {
         {
             let mut handle_lock = client.update_task_handle.write().await;
             _ = handle_lock.insert(tokio::spawn(util::async_noop())); // This will make the task terminate immediately.
-                                                                      // However, we still have to wait slightly due to scheduling overhead
+            // However, we still have to wait slightly due to scheduling overhead
             util::await_concurrent_task_progress(time::Duration::from_millis(10)).await;
         }
         client

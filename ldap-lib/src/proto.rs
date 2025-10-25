@@ -159,7 +159,7 @@ pub mod tests {
     }
 
     mod when_bind {
-        use ldap3_proto::{proto::LdapBindResponse, SimpleBindRequest};
+        use ldap3_proto::{SimpleBindRequest, proto::LdapBindResponse};
 
         use super::*;
 
@@ -269,7 +269,7 @@ pub mod tests {
 
     mod when_search {
         use keycloak_service_account::client::TestGroup;
-        use ldap3_proto::{proto::LdapResult, LdapFilter, LdapSearchScope};
+        use ldap3_proto::{LdapFilter, LdapSearchScope, proto::LdapResult};
 
         use super::*;
 
