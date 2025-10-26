@@ -4,7 +4,20 @@
 
 `roundcube-ldap  --disable-ldaps --keycloak-address https://keycloak.giz.berlin/auth --session-first-answer-delay-millis 0`
 
-## Configure in Roundcube
+## Configuration
+
+This section guides you through the necessary configuration required for both components Keycloak and Roundcube.
+
+### Keycloak
+
+1. Create a new confidential client
+1. Deactivate all authentication mechanisms except `Service-Account-Roles`
+1. Add these roles to the Service-Account-Roles
+    1. `query-users` from `realm-management`
+    1. `query-groups` from `realm-management`
+    1. `view-users` from `realm-management`
+
+### Roundcube
 
 Add to your Roundcube `config.php` the following lines:
 
@@ -12,23 +25,13 @@ Add to your Roundcube `config.php` the following lines:
 // See https://github.com/roundcube/roundcubemail/blob/master/config/defaults.inc.php
 $config['ldap_public']['Keycloak'] = [
   'name' => 'Keycloak',
-  'hosts' => array('your-instance:3000'),
+  'hosts' => array('<your-ldap-proxy-host>:3000'),
   'ldap_version'  => 3,
   'network_timeout' => 1,
   'user_specific' => false,
   'base_dn'       => 'dc=giz,dc=berlin',
   'bind_dn'       => '<your-client-id>',
   'bind_pass'     => '<your-client-secret>',
-  'search_base_dn' => '',
-  'search_filter'  => '',
-  'search_bind_dn' => '',
-  'search_bind_pw' => '',
-  'domain_base_dn' => '',
-  'domain_filter'  => '',
-  'search_bind_attrib' => [],
-  'search_dn_default' => '',
-  'auth_cid'       => '',
-  'auth_method'    => '',
   // Indicates if the addressbook shall be hidden from the list.
   // With this option enabled you can still search/view contacts.
   'hidden'        => false,
@@ -48,11 +51,34 @@ $config['ldap_public']['Keycloak'] = [
     'firstname'   => 'givenName',
     'jobtitle'    => 'username',
     'email'       => 'mail:*',
+    'uid'         => 'cn',
   ],
   'sub_fields' => [],
   'sort'           => 'displayName',
   'scope'          => 'sub',
-  'filter'         => '',
+  'filter'         => '(objectClass=inetOrgPerson)',
   'fuzzy_search'   => true,  // server allows wildcard search
+
+  'groups'  => [
+    'base_dn'           => '',
+    'scope'             => 'sub',
+    'filter'            => '(objectClass=groupOfUniqueNames)',
+    'object_classes'    => ['top', 'groupOfUniqueNames'],
+    'member_attr'       => 'uniqueMember',
+    'name_attr'         => 'fullName',
+    'email_attr'        => 'mail',
+    'member_filter'     => '(objectClass=inetOrgPerson)',
+    'vlv'               => false,
+    'class_member_attr' => [
+      'groupofnames'       => 'member',
+      'groupofuniquenames' => 'uniquemember'
+    ],
+  ],
 ];
+
+// This cache type is important as with the db cache, some weird issues (old cache entries) might arise
+$config['ldap_cache'] = 'apcu';
+$config['ldap_cache_ttl'] = '1m';
+
+$config['autocomplete_addressbooks'] = ['sql', 'Keycloak'];
 ```
