@@ -24,7 +24,7 @@ use crate::{caching, dto, keycloak_service_account, proto, server, tls};
 /// keycloak client has access to.
 struct CliArguments {
     #[clap(long, short, default_value = "0.0.0.0:3000", help = "Bind address with port")]
-    bind_addr: String,
+    bind_address: String,
 
     #[clap(long, default_value = "dc=giz,dc=berlin", help = "The base point of our LDAP tree")]
     base_distinguished_name: String,
@@ -65,22 +65,22 @@ struct CliArguments {
 
     #[clap(
         long,
-        default_value = "55",
-        help = "Time to wait before sending first response in a session, because some client implementations will miss the first response if it comes in too fast."
+        default_value = "0",
+        help = "Time to wait before sending first response in a session in milliseconds, because some client implementations will miss the first response if it comes in too fast."
     )]
     session_first_answer_delay_millis: u64,
 
     #[clap(
         long,
         default_value = "30",
-        help = "How often to update entries in the LDAP cache. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!"
+        help = "How often to update entries in the LDAP cache in seconds. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!"
     )]
     cache_update_interval_secs: u64,
 
     #[clap(
         long,
         default_value = "3600",
-        help = "How long to wait before pruning LDAP cache entries that are not being accessed."
+        help = "How long to wait in seconds before pruning LDAP cache entries that are not being accessed."
     )]
     cache_entry_max_inactive_secs: u64,
 
@@ -143,17 +143,17 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttribu
         .init();
 
     let ssl_acceptor = if !args.disable_ldaps {
-        tracing::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
+        tracing::info!("Starting LDAPS interface ldaps://{} ...", args.bind_address);
         Some(tls::setup_tls(
             std::path::PathBuf::from(args.certificate),
             std::path::PathBuf::from(args.certificate_key),
         )?)
     } else {
-        tracing::info!("Starting LDAP interface ldap://{} ...", args.bind_addr);
+        tracing::info!("Starting LDAP interface ldap://{} ...", args.bind_address);
         None
     };
 
-    let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
+    let addr = net::SocketAddr::from_str(args.bind_address.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
     let cache_configuration = caching::configuration::Configuration {
         keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
