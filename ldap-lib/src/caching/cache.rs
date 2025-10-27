@@ -92,7 +92,7 @@ impl KeycloakClientLdapCache {
         let mut organization = self.configuration.ldap_entry_builder.organization();
         let mut users: std::collections::HashMap<String, dto::LdapEntry> = self
             .service_account_client
-            .query_users(self.configuration.num_users_to_fetch)
+            .query_users(self.configuration.num_users_to_fetch.unwrap_or(-1))
             .await?
             .into_iter()
             .filter_map(|user| Some((user.id.clone()?, self.configuration.ldap_entry_builder.build_from_keycloak_user(user)?)))
@@ -220,8 +220,8 @@ pub(crate) mod test {
     #[fixture]
     pub fn config(#[default(false)] include_group_info: bool) -> configuration::Configuration {
         configuration::Configuration {
-            keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
-            num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
+            keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
+            num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
             include_group_info,
             cache_update_interval: CACHE_UPDATE_INTERVAL,
             max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,

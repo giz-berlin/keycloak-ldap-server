@@ -141,7 +141,7 @@ pub mod tests {
     ) -> Arc<caching::registry::Registry> {
         let cache = caching::registry::Registry::new(
             caching::configuration::Configuration {
-                keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string()),
+                keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
                 num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
                 include_group_info,
                 cache_update_interval: Duration::from_secs(30),

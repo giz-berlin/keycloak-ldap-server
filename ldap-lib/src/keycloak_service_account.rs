@@ -8,20 +8,34 @@ use crate::proto;
 pub struct ServiceAccountClientBuilder {
     keycloak_address: String,
     realm: String,
+    insecure_disable_tls_verification: bool,
 }
 
 impl ServiceAccountClientBuilder {
-    pub fn new(keycloak_address: String, realm: String) -> Self {
-        Self { keycloak_address, realm }
+    pub fn new(keycloak_address: String, realm: String, insecure_disable_tls_verification: bool) -> Self {
+        Self {
+            keycloak_address,
+            realm,
+            insecure_disable_tls_verification,
+        }
     }
 
     /// Construct a new client using provided service account credentials.
     /// Will verify that the credentials authenticate successfully.
     pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> Result<ServiceAccountClient, proto::LdapError> {
+        let mut reqwest_builder = reqwest::Client::builder();
+        if self.insecure_disable_tls_verification {
+            reqwest_builder = reqwest_builder.danger_accept_invalid_certs(true);
+        }
+
         // Note that the token we receive is not validated, but that might be fine in our case.
         // Also, since the acquire method is not public, we need to do some API request to validate we actually have a working client...
-        let keycloak_client =
-            keycloak::KeycloakServiceAccountAdminTokenRetriever::create_with_custom_realm(client_id, client_secret, &self.realm, reqwest::Client::new());
+        let keycloak_client = keycloak::KeycloakServiceAccountAdminTokenRetriever::create_with_custom_realm(
+            client_id,
+            client_secret,
+            &self.realm,
+            reqwest_builder.build().unwrap(),
+        );
 
         let service_account = ServiceAccountClient::new(
             keycloak::KeycloakAdmin::new(&self.keycloak_address, keycloak_client, reqwest::Client::new()),

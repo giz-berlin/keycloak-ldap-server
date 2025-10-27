@@ -8,24 +8,27 @@ publish = false
 
 [dependencies]
 anyhow = "~1.0.95"
+async-recursion = "1.1.1"
 clap = "~4.5.24"
 clap-verbosity-flag = "~3.0.2"
 futures-util = { version = "~0.3.31", features = ["sink"] }
+itertools = "0.14.0"
 keycloak = "~25.0.400"
 ldap3_proto = "~0.6.2"
+mockall_double = "~0.3.1"
 openssl = "~0.10.68"
 regex = "~1.11.1"
 reqwest = "~0.12.12"
+rust-crypto = "0.2.36"
+sentry = { version = "0.36", features = ["tracing"] }
+serde = { version = "1.0.218", features = ["serde_derive"] }
 tokio = { version = "~1.42.0", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
 tokio-openssl = "~0.6.5"
 tokio-util = "~0.7.13"
-uuid = { version = "~1.11.0", features = ["v4"] }
-mockall_double = "~0.3.1"
-itertools = "0.14.0"
-rust-crypto = "0.2.36"
-async-recursion = "1.1.1"
+toml = "0.8.20"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+uuid = { version = "~1.11.0", features = ["v4"] }
 
 [dev-dependencies]
 rstest = "~0.24.0"
