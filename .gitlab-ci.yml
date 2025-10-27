@@ -89,20 +89,30 @@ e2e-test-ldap:
 
 docker-image:
   stage: pack
-  image:
-    name: gcr.io/kaniko-project/executor:v1.15.0-debug
-    entrypoint: [ "" ]
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/docker:latest
   needs:
     - job: build
       artifacts: true
+  tags:
+    # Use a privileged runner for building Docker container
+    - privileged
+  services:
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/docker:dind
+      alias: docker
+  variables:
+    # This will instruct Docker not to start over TLS.
+    DOCKER_TLS_CERTDIR: ""
   script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - |+
       build() {
         TARGET_BINARY=$1
         IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$TARGET_BINARY
-        /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+        docker build \
           --build-arg "BINARY=$TARGET_BINARY" \
-          --destination "$IMAGE_NAME:latest" --destination "$IMAGE_NAME:$CI_PIPELINE_IID"
+          -t "$IMAGE_NAME:latest" \
+          -t "$IMAGE_NAME:$CI_PIPELINE_IID" \
+          --push .
       }
     - build printer-ldap
     - build nextcloud-ldap
