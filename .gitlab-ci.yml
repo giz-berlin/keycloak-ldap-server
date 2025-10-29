@@ -5,15 +5,19 @@ stages:
   - test
   - pack
 
+.build_matrix: &build_matrix
+  parallel:
+    matrix:
+      - BINARY: ["printer-ldap", "nextcloud-ldap", "roundcube-ldap"]
+
 build:
   stage: build
+  <<: *build_matrix
   script:
-    - cargo build --release
+    - cargo build --release --bin $BINARY
   artifacts:
     paths:
-      - target/release/printer-ldap
-      - target/release/nextcloud-ldap
-      - target/release/roundcube-ldap
+      - target/release/$BINARY
     expire_in: 1 week
     when: always
   needs: []
@@ -41,9 +45,13 @@ test:
 
 .e2e-test:
   stage: test
+  <<: *build_matrix
   needs:
     - job: build
       artifacts: true
+      parallel:
+        matrix:
+          - BINARY: ['$[[ matrix.BINARY ]]']
   services:
     - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:25.0
       alias: keycloak
@@ -73,7 +81,7 @@ e2e-test-ldaps:
   extends: .e2e-test
   script:
     - openssl req -x509 -newkey rsa:4096 -nodes -keyout certificates/ldap_keycloak_bridge.key.pem -out certificates/ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
-    - target/release/printer-ldap --config e2e-test/ldap-server-config-ldaps.toml" &
+    - target/release/printer-ldap --config "e2e-test/ldap-server-config-ldaps.toml" &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
     - LDAPTLS_CACERT=certificates/ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
@@ -82,7 +90,7 @@ e2e-test-ldaps:
 e2e-test-ldap:
   extends: .e2e-test
   script:
-    - target/release/printer-ldap e2e-test/ldap-server-config-ldap.toml" &
+    - target/release/printer-ldap --config "e2e-test/ldap-server-config-ldap.toml" &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
     - ldapsearch -H ldap://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
@@ -90,6 +98,13 @@ e2e-test-ldap:
 
 docker-image:
   stage: pack
+  <<: *build_matrix
+  needs:
+    - job: build
+      artifacts: true
+      parallel:
+        matrix:
+          - BINARY: ['$[[ matrix.BINARY ]]']
   image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/docker:latest
   needs:
     - job: build
@@ -105,16 +120,9 @@ docker-image:
     DOCKER_TLS_CERTDIR: ""
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - |+
-      build() {
-        TARGET_BINARY=$1
-        IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$TARGET_BINARY
-        docker build \
-          --build-arg "BINARY=$TARGET_BINARY" \
-          -t "$IMAGE_NAME:latest" \
-          -t "$IMAGE_NAME:$CI_PIPELINE_IID" \
-          --push .
-      }
-    - build printer-ldap
-    - build nextcloud-ldap
-    - build roundcube-ldap
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$BINARY
+    - docker build \
+        --build-arg "BINARY=$BINARY" \
+        -t "$IMAGE_NAME:latest" \
+        -t "$IMAGE_NAME:$CI_PIPELINE_IID" \
+        --push .
