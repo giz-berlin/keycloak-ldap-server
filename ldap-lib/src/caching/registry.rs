@@ -11,14 +11,14 @@ pub const REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL: time::Duration = time::Duratio
 
 /// A thread-safe registry keeping track of and allowing access to all active client caches.
 /// Will periodically evict inactive caches.
-pub struct Registry {
-    config: Arc<configuration::Configuration>,
-    per_client_ldap_trees: tokio::sync::RwLock<std::collections::HashMap<String, Arc<cache::KeycloakClientLdapCache>>>,
+pub struct Registry<T: crate::interface::Target> {
+    config: Arc<configuration::Configuration<T>>,
+    per_client_ldap_trees: tokio::sync::RwLock<std::collections::HashMap<String, Arc<cache::KeycloakClientLdapCache<T>>>>,
 }
 
-impl Registry {
+impl<T: crate::interface::Target> Registry<T> {
     /// Create a new registry and initialize housekeeping tasks.
-    pub fn new(config: configuration::Configuration, housekeeping_interval: time::Duration) -> Arc<Self> {
+    pub fn new(config: configuration::Configuration<T>, housekeeping_interval: time::Duration) -> Arc<Self> {
         let registry = Arc::new(Self {
             config: Arc::new(config),
             per_client_ldap_trees: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -59,7 +59,7 @@ impl Registry {
     /// If the client is already present in the registry, only check whether the provided password matches the last known
     /// correct one (see note on the [KeycloakClientLdapCache::check_password] method).
     pub async fn perform_ldap_bind_for_client(self: &Arc<Self>, client: &str, password: &str) -> Result<(), proto::LdapError> {
-        let new_cache_entry: Arc<cache::KeycloakClientLdapCache>;
+        let new_cache_entry: Arc<cache::KeycloakClientLdapCache<T>>;
 
         {
             // Locking semantic of this method:
@@ -97,7 +97,7 @@ impl Registry {
     }
 
     /// Return the cache for the given client ID.
-    pub async fn obtain_client_cache(&self, client: &str) -> Result<Arc<cache::KeycloakClientLdapCache>, proto::LdapError> {
+    pub async fn obtain_client_cache(&self, client: &str) -> Result<Arc<cache::KeycloakClientLdapCache<T>>, proto::LdapError> {
         if let Some(cache_entry) = self.per_client_ldap_trees.read().await.get(client)
             && cache_entry.is_active().await
         {
@@ -113,7 +113,7 @@ impl Registry {
     /// Unregister a client cache. Will make use of an already existing lock to perform the action.
     async fn _unregister_client_cache(
         &self,
-        locked_store: &mut tokio::sync::RwLockWriteGuard<'_, std::collections::HashMap<String, Arc<cache::KeycloakClientLdapCache>>>,
+        locked_store: &mut tokio::sync::RwLockWriteGuard<'_, std::collections::HashMap<String, Arc<cache::KeycloakClientLdapCache<T>>>>,
         client: &str,
     ) {
         if let Some(cache_entry) = locked_store.get_mut(client) {
@@ -138,7 +138,7 @@ mod test {
     const REGISTRY_HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(40);
 
     #[fixture]
-    fn registry(#[default(false)] include_group_info: bool) -> Arc<Registry> {
+    fn registry(#[default(false)] include_group_info: bool) -> Arc<Registry<crate::interface::tests::DummyTarget>> {
         Registry::new(cache::test::config(include_group_info), REGISTRY_HOUSEKEEPING_INTERVAL)
     }
 
@@ -150,7 +150,7 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_prune_inactive_cache(registry: Arc<Registry>) {
+            async fn then_prune_inactive_cache(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
 
@@ -172,7 +172,7 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_do_not_prune_active_cache(registry: Arc<Registry>) {
+            async fn then_do_not_prune_active_cache(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
 
@@ -202,7 +202,7 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_create_entry_for_new_client(registry: Arc<Registry>) {
+            async fn then_create_entry_for_new_client(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
 
@@ -218,9 +218,9 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn and_client_is_inactive__then_create_new_one_and_destroy_old_one(registry: Arc<Registry>) {
+            async fn and_client_is_inactive__then_create_new_one_and_destroy_old_one(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
-                let old_cache: Arc<cache::KeycloakClientLdapCache>;
+                let old_cache: Arc<cache::KeycloakClientLdapCache<crate::interface::tests::DummyTarget>>;
                 {
                     let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                     old_cache = Arc::new(
@@ -252,7 +252,7 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_check_password(registry: Arc<Registry>) {
+            async fn then_check_password(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 registry
@@ -281,7 +281,7 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn then_return_it(registry: Arc<Registry>) {
+            async fn then_return_it(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 registry
@@ -295,14 +295,14 @@ mod test {
 
             #[rstest]
             #[tokio::test]
-            async fn for_unknown_client__then_return_error(registry: Arc<Registry>) {
+            async fn for_unknown_client__then_return_error(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // when & then
                 assert!(registry.obtain_client_cache(test_constants::DEFAULT_CLIENT_ID).await.is_err());
             }
 
             #[rstest]
             #[tokio::test]
-            async fn for_inactive_client__then_return_error(registry: Arc<Registry>) {
+            async fn for_inactive_client__then_return_error(registry: Arc<Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
                 {

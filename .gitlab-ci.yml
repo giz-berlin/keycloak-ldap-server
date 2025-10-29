@@ -73,7 +73,7 @@ e2e-test-ldaps:
   extends: .e2e-test
   script:
     - openssl req -x509 -newkey rsa:4096 -nodes -keyout certificates/ldap_keycloak_bridge.key.pem -out certificates/ldap_keycloak_bridge.crt.pem -subj "/C=DE/CN=127.0.0.1"
-    - target/release/printer-ldap --keycloak-address "http://keycloak:8080" &
+    - target/release/printer-ldap --config e2e-test/ldap-server-config-ldaps.toml" &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
     - LDAPTLS_CACERT=certificates/ldap_keycloak_bridge.crt.pem ldapsearch -H ldaps://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt
@@ -82,7 +82,7 @@ e2e-test-ldaps:
 e2e-test-ldap:
   extends: .e2e-test
   script:
-    - target/release/printer-ldap --keycloak-address "http://keycloak:8080" --disable-ldaps &
+    - target/release/printer-ldap e2e-test/ldap-server-config-ldap.toml" &
     # Wait for server to start. This is not the cleanest solution, but should be good enough here
     - sleep 1
     - ldapsearch -H ldap://127.0.0.1:3000 -x -LLL -D ldap_bridge -w ldap_bridge_secret -b dc=giz,dc=berlin -s subtree '(objectClass=*)' +  | tee ldap_result.txt

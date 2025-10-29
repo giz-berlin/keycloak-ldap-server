@@ -7,6 +7,7 @@ pub struct Target;
 
 impl giz_ldap_lib::interface::Target for Target {
     type Config = giz_ldap_lib::config::EmptyConfig;
+    type KeycloakAttributeExtractor = PrinterUserAttributeExtractor;
 }
 
 pub struct PrinterUserAttributeExtractor;
@@ -57,5 +58,5 @@ impl giz_ldap_lib::dto::KeycloakAttributeExtractor for PrinterUserAttributeExtra
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    giz_ldap_lib::server::start_ldap_server::<Target>(Box::new(PrinterUserAttributeExtractor {}), true).await
+    giz_ldap_lib::server::start_ldap_server::<Target>(PrinterUserAttributeExtractor {}, true).await
 }

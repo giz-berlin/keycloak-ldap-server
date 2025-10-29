@@ -7,8 +7,8 @@ use crate::{caching::configuration, dto, keycloak_service_account, proto};
 /// A keycloak client LDAP registry keeps track of a set of user and (potentially) group information as visible to a certain keycloak client.
 /// The information is provided in form of an LDAP tree.
 /// Will periodically sync the LDAP information from keycloak.
-pub struct KeycloakClientLdapCache {
-    configuration: Arc<configuration::Configuration>,
+pub struct KeycloakClientLdapCache<T: crate::interface::Target> {
+    configuration: Arc<configuration::Configuration<T>>,
 
     update_task_handle: tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>,
 
@@ -19,11 +19,11 @@ pub struct KeycloakClientLdapCache {
     root: tokio::sync::RwLock<dto::LdapEntry>,
 }
 
-impl KeycloakClientLdapCache {
+impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
     /// Construct a new client cache.
     ///
     /// Will only succeed iff the entered credentials are valid.
-    pub async fn create(configuration: Arc<configuration::Configuration>, client: &str, password: &str) -> Result<Self, proto::LdapError> {
+    pub async fn create(configuration: Arc<configuration::Configuration<T>>, client: &str, password: &str) -> Result<Self, proto::LdapError> {
         let service_account_client = configuration
             .keycloak_service_account_client_builder
             .new_service_account(client, password)
@@ -218,7 +218,7 @@ pub(crate) mod test {
     pub const MAX_ENTRY_INACTIVE_TIME: Duration = Duration::from_secs(60);
 
     #[fixture]
-    pub fn config(#[default(false)] include_group_info: bool) -> configuration::Configuration {
+    pub fn config(#[default(false)] include_group_info: bool) -> configuration::Configuration<crate::interface::tests::DummyTarget> {
         configuration::Configuration {
             keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
             num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
@@ -229,7 +229,11 @@ pub(crate) mod test {
         }
     }
 
-    pub async fn create_inactive_cache(configuration: Arc<configuration::Configuration>, client_id: &str, password: &str) -> KeycloakClientLdapCache {
+    pub async fn create_inactive_cache(
+        configuration: Arc<configuration::Configuration<crate::interface::tests::DummyTarget>>,
+        client_id: &str,
+        password: &str,
+    ) -> KeycloakClientLdapCache<crate::interface::tests::DummyTarget> {
         let client = KeycloakClientLdapCache::create(configuration, client_id, password).await.unwrap();
         {
             let mut handle_lock = client.update_task_handle.write().await;
@@ -245,7 +249,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_fail_on_invalid_client_auth(config: configuration::Configuration) {
+        async fn then_fail_on_invalid_client_auth(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_err(LdapResultCode::InvalidCredentials);
 
@@ -262,7 +266,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_fetch_information(config: configuration::Configuration) {
+        async fn then_fetch_information(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -280,7 +284,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_trigger_scheduled_update(config: configuration::Configuration) {
+        async fn then_trigger_scheduled_update(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let client_cache = Arc::new(
@@ -305,7 +309,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn and_update_task_still_running__then_return_true(config: configuration::Configuration) {
+        async fn and_update_task_still_running__then_return_true(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -323,7 +327,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn and_update_task_no_longer_running__then_return_false(config: configuration::Configuration) {
+        async fn and_update_task_no_longer_running__then_return_false(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = KeycloakClientLdapCache::create(Arc::new(config), test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
@@ -344,7 +348,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_it_is_marked_destroyed(config: configuration::Configuration) {
+        async fn then_it_is_marked_destroyed(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -363,7 +367,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_update_task_is_removed(config: configuration::Configuration) {
+        async fn then_update_task_is_removed(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -393,7 +397,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_periodically_update_data(config: configuration::Configuration) {
+        async fn then_periodically_update_data(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -417,7 +421,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_stop_when_inactive(config: configuration::Configuration) {
+        async fn then_stop_when_inactive(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -437,7 +441,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_stop_on_update_error(config: configuration::Configuration) {
+        async fn then_stop_on_update_error(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let cache = Arc::new(
@@ -461,7 +465,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_accept_valid_password(config: configuration::Configuration) {
+        async fn then_accept_valid_password(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let entry = KeycloakClientLdapCache::create(Arc::new(config), test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)
@@ -474,7 +478,7 @@ pub(crate) mod test {
 
         #[rstest]
         #[tokio::test]
-        async fn then_reject_invalid_password(config: configuration::Configuration) {
+        async fn then_reject_invalid_password(config: configuration::Configuration<crate::interface::tests::DummyTarget>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let entry = KeycloakClientLdapCache::create(Arc::new(config), test_constants::DEFAULT_CLIENT_ID, test_constants::DEFAULT_CLIENT_PASSWORD)

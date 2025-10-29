@@ -9,6 +9,7 @@ pub struct Target;
 
 impl giz_ldap_lib::interface::Target for Target {
     type Config = giz_ldap_lib::config::EmptyConfig;
+    type KeycloakAttributeExtractor = NextcloudAttributeExtractor;
 }
 
 pub struct NextcloudAttributeExtractor;
@@ -46,5 +47,5 @@ impl dto::KeycloakAttributeExtractor for NextcloudAttributeExtractor {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(Box::new(NextcloudAttributeExtractor {}), true).await
+    server::start_ldap_server::<Target>(NextcloudAttributeExtractor {}, true).await
 }

@@ -24,12 +24,12 @@ pub enum LdapResponseState {
 /// A handler capable of adhering to the LDAP protocol and properly perform LDAP operations.
 /// It knows how our DIT (directory information tree) looks like and how to bind clients by
 /// handing off the authentication decision to a Keycloak server.
-pub struct LdapHandler {
-    ldap_tree_cache: Arc<caching::registry::Registry>,
+pub struct LdapHandler<T: crate::interface::Target> {
+    ldap_tree_cache: Arc<caching::registry::Registry<T>>,
 }
 
-impl LdapHandler {
-    pub fn new(ldap_tree_cache: Arc<caching::registry::Registry>) -> Self {
+impl<T: crate::interface::Target> LdapHandler<T> {
+    pub fn new(ldap_tree_cache: Arc<caching::registry::Registry<T>>) -> Self {
         LdapHandler { ldap_tree_cache }
     }
 
@@ -125,11 +125,11 @@ pub mod tests {
     use crate::{dto, keycloak_service_account, test_util::test_constants};
 
     #[fixture]
-    pub fn ldap_entry_builder() -> dto::LdapEntryBuilder {
+    pub fn ldap_entry_builder() -> dto::LdapEntryBuilder<crate::interface::tests::DummyTarget> {
         dto::LdapEntryBuilder::new(
             test_constants::DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             test_constants::DEFAULT_ORGANIZATION_NAME.to_string(),
-            Box::new(dto::test_util::DummyExtractor {}),
+            crate::interface::tests::DummyKeycloakAttributeExtractor {},
         )
     }
 
@@ -137,12 +137,12 @@ pub mod tests {
     async fn cache_registry(
         #[default(true)] register_default_client: bool,
         #[default(false)] include_group_info: bool,
-        ldap_entry_builder: dto::LdapEntryBuilder,
-    ) -> Arc<caching::registry::Registry> {
+        ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
+    ) -> Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>> {
         let cache = caching::registry::Registry::new(
             caching::configuration::Configuration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
-                num_users_to_fetch: test_constants::DEFAULT_NUM_USERS_TO_FETCH,
+                num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
                 include_group_info,
                 cache_update_interval: Duration::from_secs(30),
                 max_entry_inactive_time: Duration::from_secs(60 * 60),
@@ -177,7 +177,7 @@ pub mod tests {
         async fn with_correct_credentials__then_succeed(
             #[future]
             #[with(false)]
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
@@ -210,7 +210,7 @@ pub mod tests {
         async fn with_invalid_credentials__then_fail(
             #[future]
             #[with(false)]
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_err(LdapResultCode::Other);
@@ -231,7 +231,7 @@ pub mod tests {
         async fn without_keycloak_connection__then_fail(
             #[future]
             #[with(false)]
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_err(LdapResultCode::Unavailable);
@@ -252,7 +252,7 @@ pub mod tests {
         async fn anonymously__then_reject_request(
             #[future]
             #[with(false)]
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let client_session = server::LdapClientSession::new();
@@ -340,7 +340,7 @@ pub mod tests {
         async fn unbound__then_reject_request(
             #[future]
             #[with(false)]
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let client_session = client_session(false);
@@ -360,7 +360,7 @@ pub mod tests {
         async fn but_sudden_authentication_error__then_disconnect(
             #[future]
             #[with(false)] // Not registering the client in the cache is equivalent to it being evicted for authentication reasons later.
-            cache_registry: Arc<caching::registry::Registry>,
+            cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
         ) {
             // given
             let client_session = client_session(true);
@@ -377,7 +377,7 @@ pub mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn root_dse__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry>) {
+        async fn root_dse__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let client_session = client_session(true);
@@ -394,7 +394,7 @@ pub mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn subschema__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry>) {
+        async fn subschema__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let client_session = client_session(true);
@@ -411,7 +411,7 @@ pub mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn organization_subtree__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry>) {
+        async fn organization_subtree__then_return_result(#[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_users(vec![test_constants::DEFAULT_USER_ID]);
             let client_session = client_session(true);
@@ -432,7 +432,9 @@ pub mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn organization_subtree_with_filter__then_only_return_matching_results(#[future] cache_registry: Arc<caching::registry::Registry>) {
+        async fn organization_subtree_with_filter__then_only_return_matching_results(
+            #[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+        ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_users(vec![test_constants::DEFAULT_USER_ID, test_constants::ANOTHER_USER_ID]);
             let client_session = client_session(true);
@@ -454,8 +456,8 @@ pub mod tests {
         #[rstest]
         #[tokio::test]
         async fn specifically_for_entry__then_return_result(
-            #[future] cache_registry: Arc<caching::registry::Registry>,
-            ldap_entry_builder: dto::LdapEntryBuilder,
+            #[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+            ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
         ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_users(vec![test_constants::DEFAULT_USER_ID]);
@@ -477,7 +479,9 @@ pub mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn non_existing_entry__then_return_search_failure(#[future] cache_registry: Arc<caching::registry::Registry>) {
+        async fn non_existing_entry__then_return_search_failure(
+            #[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+        ) {
             // given
             let _lock = keycloak_service_account::ServiceAccountClient::set_empty();
             let client_session = client_session(true);
@@ -497,7 +501,7 @@ pub mod tests {
 
             #[rstest]
             #[tokio::test]
-            async fn then_do_not_return_groups(#[future] cache_registry: Arc<caching::registry::Registry>) {
+            async fn then_do_not_return_groups(#[future] cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
                     vec![test_constants::DEFAULT_USER_ID],
@@ -524,7 +528,7 @@ pub mod tests {
             async fn then_do_return_groups(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -552,7 +556,7 @@ pub mod tests {
             async fn by_group_objectclass__then_only_return_groups(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -581,7 +585,7 @@ pub mod tests {
             async fn by_user_objectclass__then_only_return_users(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -609,8 +613,8 @@ pub mod tests {
             async fn then_assign_users_to_groups(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: dto::LdapEntryBuilder,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+                ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -645,8 +649,8 @@ pub mod tests {
             async fn then_assign_groups_to_users(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: dto::LdapEntryBuilder,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+                ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -681,8 +685,8 @@ pub mod tests {
             async fn then_return_subgroups(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: dto::LdapEntryBuilder,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+                ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(
@@ -714,8 +718,8 @@ pub mod tests {
             async fn then_build_full_subgroup_hierarchy(
                 #[future]
                 #[with(true, true)]
-                cache_registry: Arc<caching::registry::Registry>,
-                ldap_entry_builder: dto::LdapEntryBuilder,
+                cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
+                ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
                 // given
                 let _lock = keycloak_service_account::ServiceAccountClient::set_users_groups(

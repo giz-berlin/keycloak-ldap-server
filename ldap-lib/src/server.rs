@@ -68,7 +68,7 @@ impl Display for LdapClientSession {
 ///
 /// This method also allows configuring whether group information should be provided as well.
 pub async fn start_ldap_server<T: crate::interface::Target>(
-    attribute_extractor: Box<dyn dto::KeycloakAttributeExtractor>,
+    attribute_extractor: T::KeycloakAttributeExtractor,
     include_group_info: bool,
 ) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
@@ -128,7 +128,7 @@ pub async fn start_ldap_server<T: crate::interface::Target>(
 
     let addr = net::SocketAddr::from_str(config.ldap_server.bind_address.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let cache_configuration = caching::configuration::Configuration {
+    let cache_configuration = caching::configuration::Configuration::<T> {
         keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(
             config.source.keycloak_api.url,
             config.source.keycloak_api.realm,
@@ -169,8 +169,8 @@ pub async fn start_ldap_server<T: crate::interface::Target>(
 /// convert them into log messages.
 /// If a TLS acceptor has been passed in, interpret the TcpStream as a SslStream.
 /// Else, just use it as an unencrypted stream.
-async fn client_session(
-    ldap: Arc<proto::LdapHandler>,
+async fn client_session<T: crate::interface::Target>(
+    ldap: Arc<proto::LdapHandler<T>>,
     tcp_stream: tokio::net::TcpStream,
     ssl_acceptor: Option<SslAcceptor>,
     client_address: net::SocketAddr,
@@ -198,15 +198,16 @@ async fn client_session(
 }
 
 /// Handle receiving and sending of LDAP messages for a client session.
-async fn _client_session<T>(
+async fn _client_session<T, S>(
     session: &mut LdapClientSession,
-    ldap: Arc<proto::LdapHandler>,
-    stream: T,
+    ldap: Arc<proto::LdapHandler<T>>,
+    stream: S,
     client_address: net::SocketAddr,
     delay_before_first_answer: time::Duration,
 ) -> anyhow::Result<()>
 where
-    T: AsyncRead + AsyncWrite,
+    S: AsyncRead + AsyncWrite,
+    T: crate::interface::Target,
 {
     let (r, w) = tokio::io::split(stream);
     let mut ldap_reader = tokio_util::codec::FramedRead::new(r, LdapCodec::default());

@@ -19,14 +19,14 @@ pub trait KeycloakAttributeExtractor: Send + Sync {
     }
 }
 
-pub(crate) struct LdapEntryBuilder {
+pub(crate) struct LdapEntryBuilder<T: crate::interface::Target> {
     base_distinguished_name: String,
     organization_name: String,
-    extractor: Box<dyn KeycloakAttributeExtractor>,
+    extractor: T::KeycloakAttributeExtractor,
 }
 
-impl LdapEntryBuilder {
-    pub fn new(base_distinguished_name: String, organization_name: String, extractor: Box<dyn KeycloakAttributeExtractor>) -> Self {
+impl<T: crate::interface::Target> LdapEntryBuilder<T> {
+    pub fn new(base_distinguished_name: String, organization_name: String, extractor: T::KeycloakAttributeExtractor) -> Self {
         Self {
             base_distinguished_name,
             organization_name,
