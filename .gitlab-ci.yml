@@ -1,4 +1,4 @@
-image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/rust:1
+image: dr.rechenknecht.net/bauhelfer/container/main/rust:ubuntu-jammy
 
 stages:
   - build
@@ -44,9 +44,19 @@ fmt-check:
 
 test:
   stage: test
-  script:
-    - cargo test
   needs: []
+  script:
+    - cargo llvm-cov --html --all-features
+    - cargo llvm-cov report --cobertura --output-path target/llvm-cov/cobertura.xml
+    - "xmllint --xpath \"concat('Coverage: ', 100 * string(//coverage/@line-rate), '%')\" target/llvm-cov/cobertura.xml"
+  coverage: '/Coverage: \d+(?:\.\d+)?/'
+  artifacts:
+    paths:
+      - target/llvm-cov/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: target/llvm-cov/cobertura.xml
 
 .e2e-test:
   stage: test
