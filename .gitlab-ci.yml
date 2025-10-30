@@ -20,9 +20,13 @@ build:
   <<: *build_matrix
   script:
     - cargo build --release --bin $BINARY
+    # We store the version number here as the binary does not run with other Linux variants
+    # (like this is built with GNU libc and the container with musl libc)
+    - target/release/$BINARY -V > target/release/${BINARY}-version
   artifacts:
     paths:
       - target/release/$BINARY
+      - target/release/${BINARY}-version
     expire_in: 1 week
     when: always
   needs: []
@@ -136,8 +140,16 @@ docker-image:
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - export IMAGE_NAME=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG/$BINARY
-    - docker build \
-        --build-arg "BINARY=$BINARY" \
-        -t "$IMAGE_NAME:latest" \
-        -t "$IMAGE_NAME:$CI_PIPELINE_IID" \
-        --push .
+    - export BINARY_VERSION=`cat target/release/${BINARY}-version | cut -d ' ' -f2`
+    - export BINARY_VERSION_MAJOR=`echo $BINARY_VERSION | cut -d '.' -f1`
+    - export BINARY_VERSION_MINOR=`echo $BINARY_VERSION | cut -d '.' -f2`
+    - export BINARY_VERSION_PATCH=`echo $BINARY_VERSION | cut -d '.' -f3`
+    - docker build
+        --build-arg "BINARY=$BINARY"
+        -t "$IMAGE_NAME:latest"
+        -t "$IMAGE_NAME:pipeline-$CI_PIPELINE_IID"
+        -t "$IMAGE_NAME:v-$BINARY_VERSION_MAJOR"
+        -t "$IMAGE_NAME:v-$BINARY_VERSION_MAJOR.$BINARY_VERSION_MINOR"
+        -t "$IMAGE_NAME:v-$BINARY_VERSION_MAJOR.$BINARY_VERSION_MINOR.$BINARY_VERSION_PATCH"
+        --push
+        .
