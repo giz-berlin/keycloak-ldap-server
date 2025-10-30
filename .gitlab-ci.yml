@@ -5,10 +5,15 @@ stages:
   - test
   - pack
 
+.binaries: &binaries
+  - printer-ldap
+  - nextcloud-ldap
+  - roundcube-ldap
+
 .build_matrix: &build_matrix
   parallel:
     matrix:
-      - BINARY: ["printer-ldap", "nextcloud-ldap", "roundcube-ldap"]
+      - BINARY: *binaries
 
 build:
   stage: build
@@ -51,7 +56,7 @@ test:
       artifacts: true
       parallel:
         matrix:
-          - BINARY: ['$[[ matrix.BINARY ]]']
+          - BINARY: *binaries
   services:
     - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:25.0
       alias: keycloak
@@ -104,7 +109,7 @@ docker-image:
       artifacts: true
       parallel:
         matrix:
-          - BINARY: ['$[[ matrix.BINARY ]]']
+          - BINARY: *binaries
   image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/library/docker:latest
   needs:
     - job: build
