@@ -8,4 +8,6 @@ publish = false
 anyhow = "~1.0.95"
 giz-ldap-lib = { path="../ldap-lib" }
 keycloak = "~25.0.400"
+serde = { version = "1.0.218", features = ["serde_derive"] }
 tokio = { version = "~1.42.0", features = ["io-util"] }
+tracing = "0.1.41"

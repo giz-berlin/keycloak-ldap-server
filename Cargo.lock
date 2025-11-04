@@ -1538,7 +1538,9 @@ dependencies = [
  "anyhow",
  "giz-ldap-lib",
  "keycloak",
+ "serde",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

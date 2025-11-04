@@ -8,13 +8,12 @@ use keycloak::types::{GroupRepresentation, UserRepresentation};
 pub struct Target;
 
 impl giz_ldap_lib::interface::Target for Target {
-    type Config = giz_ldap_lib::config::EmptyConfig;
-    type KeycloakAttributeExtractor = NextcloudAttributeExtractor;
-}
+    type TargetConfig = giz_ldap_lib::config::EmptyConfig;
 
-pub struct NextcloudAttributeExtractor;
+    fn new(_config: std::sync::Arc<giz_ldap_lib::config::Config<Self::TargetConfig>>) -> anyhow::Result<Self> {
+        Ok(Self {})
+    }
 
-impl dto::KeycloakAttributeExtractor for NextcloudAttributeExtractor {
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("entryuuid", vec![user.id.context("user id missing")?]);
         ldap_entry.set_attribute("username", vec![user.username.context("username missing")?]);
@@ -47,5 +46,5 @@ impl dto::KeycloakAttributeExtractor for NextcloudAttributeExtractor {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(NextcloudAttributeExtractor {}, true).await
+    server::start_ldap_server::<Target>(true).await
 }

@@ -3,19 +3,18 @@ use anyhow::Context;
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Config<T> {
-    /// Configuration for Sentry error tracing
-    #[serde(default)]
-    pub sentry: SentryConfig,
+    /// Configuration for Sentry error tracing. Sentry integration becomes active once set.
+    pub sentry: Option<SentryConfig>,
 
-    /// Configuration of data source (only Keycloak in this case)
+    /// Configuration of data source (only Keycloak in this case).
     #[serde(default)]
     pub source: SourceConfig,
 
-    /// Configuration of data sink (different LDAP server variants)
+    /// Configuration of data sink (different LDAP server variants).
     #[allow(dead_code)]
     pub target: T,
 
-    /// Common configuration of LDAP server
+    /// Common configuration of LDAP server.
     #[serde(default)]
     pub ldap_server: LdapServerConfig,
 }
@@ -24,7 +23,7 @@ pub struct Config<T> {
 #[serde(default)]
 pub struct SourceConfig {
     pub keycloak_api: KeycloakApiConfig,
-    /// Number of users to fetch from Keycloak per request
+    /// Number of users to fetch from Keycloak per request.
     pub fetch_users_num: Option<i32>,
 }
 
@@ -97,14 +96,12 @@ pub struct EmptyConfig {}
 
 #[derive(serde::Deserialize, Debug, Default)]
 pub struct SentryConfig {
-    /// Whether the sentry integration is active.
-    pub active: bool,
     /// Sentry Data Source Name (DSN). Tells Sentry where to send events to so they're associated with the correct project.
     /// Must be specified if Sentry is `active`.
-    pub dsn: Option<String>,
+    pub dsn: String,
     /// Tag specifying which context the service is running in (for example, development, production, ...).
     /// Must be specified if Sentry is `active`.
-    pub environment: Option<String>,
+    pub environment: String,
 }
 
 impl<T: serde::de::DeserializeOwned> Config<T> {
@@ -139,7 +136,6 @@ mod tests {
     fn test_try_from_str_valid() {
         let toml_str = r#"
             [sentry]
-            active = true
             dsn = "https://example@sentry.io/123"
             environment = "production"
 
@@ -149,31 +145,26 @@ mod tests {
         "#;
         let config = Config::<EmptyConfig>::try_from_str(toml_str).unwrap();
         let sentry = config.sentry;
-        assert!(sentry.active);
-        assert_eq!(sentry.dsn.unwrap(), "https://example@sentry.io/123");
-        assert_eq!(sentry.environment.unwrap(), "production");
+        assert!(sentry.is_some());
+        assert_eq!(sentry.as_ref().unwrap().dsn, "https://example@sentry.io/123");
+        assert_eq!(sentry.as_ref().unwrap().environment, "production");
     }
 
     #[test]
     fn test_try_from_str_sentry_inactive() {
         let toml_str = r#"
-            [sentry]
-            active = false
-            # other fields may be left out.
-
             [source]
 
             [target]
         "#;
         let config = Config::<EmptyConfig>::try_from_str(toml_str).unwrap();
-        assert!(!config.sentry.active);
+        assert!(config.sentry.is_none());
     }
 
     #[test]
     fn test_try_from_str_missing_section() {
         let toml_str = r#"
             [sentry]
-            active = false
         "#;
         let result = Config::<EmptyConfig>::try_from_str(toml_str);
         assert!(result.is_err());

@@ -5,28 +5,14 @@ use crate::dto::entry;
 pub const PRIMARY_USER_OBJECT_CLASS: &str = "inetOrgPerson";
 pub const PRIMARY_GROUP_OBJECT_CLASS: &str = "groupOfUniqueNames";
 
-/// An interface for customizing which attributes of a Keycloak entity should be added to the
-/// corresponding LDAP entry.
-// Trait bound in order to pass impls to async functions
-pub trait KeycloakAttributeExtractor: Send + Sync {
-    /// Add the desired user attributes to the keycloak entry.
-    fn extract_user(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()>;
-
-    /// Add the desired group attributes to the keycloak entry.
-    fn extract_group(&self, _group: keycloak::types::GroupRepresentation, _ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
-        // Provide a default implementation here as not all clients want to deal with groups.
-        Ok(())
-    }
-}
-
 pub(crate) struct LdapEntryBuilder<T: crate::interface::Target> {
     base_distinguished_name: String,
     organization_name: String,
-    extractor: T::KeycloakAttributeExtractor,
+    extractor: T,
 }
 
 impl<T: crate::interface::Target> LdapEntryBuilder<T> {
-    pub fn new(base_distinguished_name: String, organization_name: String, extractor: T::KeycloakAttributeExtractor) -> Self {
+    pub fn new(base_distinguished_name: String, organization_name: String, extractor: T) -> Self {
         Self {
             base_distinguished_name,
             organization_name,
@@ -82,6 +68,8 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
 
     /// Convert a keycloak user to its corresponding LDAP representation.
     pub fn build_from_keycloak_user(&self, user: keycloak::types::UserRepresentation) -> Option<entry::LdapEntry> {
+        tracing::trace!("Build from Keycloak user {user:?}");
+
         let mut entry = entry::LdapEntry::new(
             self.user_dn(user.id.as_ref()?),
             vec![
@@ -93,7 +81,10 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
         // No matter the extractor, the LDAP specification says that we need to have an
         // attribute matching the identifier used in the dsn
         entry.set_attribute("cn", vec![user.id.clone()?]);
-        self.extractor.extract_user(user, &mut entry).ok()?;
+        let tracing_user_uid = user.id.clone();
+        if let Err(err) = self.extractor.extract_user(user, &mut entry) {
+            tracing::warn!("Extracting user id {tracing_user_uid:?} failed due to {err:?}");
+        }
 
         Some(entry)
     }
@@ -168,20 +159,5 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
         }
 
         entry
-    }
-}
-
-#[cfg(test)]
-pub mod test_util {
-    use keycloak::types::UserRepresentation;
-
-    use super::*;
-
-    pub struct DummyExtractor;
-
-    impl KeycloakAttributeExtractor for DummyExtractor {
-        fn extract_user(&self, _user: UserRepresentation, _ldap_entry: &mut entry::LdapEntry) -> anyhow::Result<()> {
-            Ok(())
-        }
     }
 }

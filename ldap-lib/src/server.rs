@@ -15,7 +15,7 @@ use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{caching, dto, keycloak_service_account, proto, server, tls};
+use crate::{caching, keycloak_service_account, proto, server, tls};
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
@@ -63,14 +63,10 @@ impl Display for LdapClientSession {
 /// is expected to NOT do itself.
 ///
 /// As the concrete user and group information needed depends on the specific use case,
-/// this method accepts a [dto::KeycloakAttributeExtractor] implementation used to populate
-/// the LDAP entries.
+/// this method is templated via the Generic [Target](crate::interface::Target) interface.
 ///
 /// This method also allows configuring whether group information should be provided as well.
-pub async fn start_ldap_server<T: crate::interface::Target>(
-    attribute_extractor: T::KeycloakAttributeExtractor,
-    include_group_info: bool,
-) -> anyhow::Result<()> {
+pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: bool) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
     tracing_subscriber::fmt()
@@ -87,20 +83,20 @@ pub async fn start_ldap_server<T: crate::interface::Target>(
         .with_line_number(true)
         .init();
 
-    let config = crate::config::Config::<T::Config>::try_from(args.config)?;
+    let config = std::sync::Arc::new(crate::config::Config::<T::TargetConfig>::try_from(args.config)?);
 
     tracing::debug!("Starting with {config:?}");
 
-    let _guard = if config.sentry.active {
-        let dsn = sentry::types::Dsn::from_str(config.sentry.dsn.as_ref().unwrap()).map_err(|err| {
-            tracing::error!("Invalid Sentry DSN {}: {}", &config.sentry.dsn.unwrap(), err);
+    let _guard = if let Some(sentry_config) = config.sentry.as_ref() {
+        let dsn = sentry::types::Dsn::from_str(&sentry_config.dsn).map_err(|err| {
+            tracing::error!("Invalid Sentry DSN {}: {}", &sentry_config.dsn, err);
             err
         })?;
 
         let guard = sentry::init(sentry::ClientOptions {
             dsn: Some(dsn),
             release: sentry::release_name!(),
-            environment: Some(config.sentry.environment.unwrap().into()),
+            environment: Some(sentry_config.environment.clone().into()),
             attach_stacktrace: true,
             trim_backtraces: true,
             // TODO: We may not want to have all transactions and thus set this to a lower value.
@@ -118,29 +114,31 @@ pub async fn start_ldap_server<T: crate::interface::Target>(
     let ssl_acceptor = if !config.ldap_server.disable_ldaps {
         tracing::info!("Starting LDAPS interface ldaps://{} ...", config.ldap_server.bind_address);
         Some(tls::setup_tls(
-            std::path::PathBuf::from(config.ldap_server.certificate),
-            std::path::PathBuf::from(config.ldap_server.certificate_key),
+            std::path::PathBuf::from(&config.ldap_server.certificate),
+            std::path::PathBuf::from(&config.ldap_server.certificate_key),
         )?)
     } else {
         tracing::info!("Starting LDAP interface ldap://{} ...", config.ldap_server.bind_address);
         None
     };
 
+    let attribute_extractor = T::new(config.clone())?;
+
     let addr = net::SocketAddr::from_str(config.ldap_server.bind_address.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
     let cache_configuration = caching::configuration::Configuration::<T> {
         keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(
-            config.source.keycloak_api.url,
-            config.source.keycloak_api.realm,
+            config.source.keycloak_api.url.clone(),
+            config.source.keycloak_api.realm.clone(),
             config.source.keycloak_api.insecure_disable_tls_verification,
         ),
         num_users_to_fetch: config.source.fetch_users_num,
         include_group_info,
         cache_update_interval: time::Duration::from_secs(config.ldap_server.cache_update_interval_secs),
         max_entry_inactive_time: time::Duration::from_secs(config.ldap_server.cache_entry_max_inactive_secs),
-        ldap_entry_builder: dto::LdapEntryBuilder::new(
-            config.ldap_server.base_distinguished_name,
-            config.ldap_server.organization_name,
+        ldap_entry_builder: crate::dto::LdapEntryBuilder::new(
+            config.ldap_server.base_distinguished_name.clone(),
+            config.ldap_server.organization_name.clone(),
             attribute_extractor,
         ),
     };

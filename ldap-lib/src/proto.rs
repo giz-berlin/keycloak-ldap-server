@@ -129,7 +129,7 @@ pub mod tests {
         dto::LdapEntryBuilder::new(
             test_constants::DEFAULT_BASE_DISTINGUISHED_NAME.to_string(),
             test_constants::DEFAULT_ORGANIZATION_NAME.to_string(),
-            crate::interface::tests::DummyKeycloakAttributeExtractor {},
+            crate::interface::tests::DummyTarget {},
         )
     }
 
