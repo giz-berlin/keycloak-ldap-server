@@ -24,9 +24,7 @@ impl ServiceAccountClientBuilder {
     /// Will verify that the credentials authenticate successfully.
     pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> Result<ServiceAccountClient, proto::LdapError> {
         let mut reqwest_builder = reqwest::Client::builder();
-        if self.insecure_disable_tls_verification {
-            reqwest_builder = reqwest_builder.danger_accept_invalid_certs(true);
-        }
+        reqwest_builder = reqwest_builder.danger_accept_invalid_certs(self.insecure_disable_tls_verification);
 
         // Note that the token we receive is not validated, but that might be fine in our case.
         // Also, since the acquire method is not public, we need to do some API request to validate we actually have a working client...
@@ -42,7 +40,9 @@ impl ServiceAccountClientBuilder {
             self.realm.clone(),
         );
 
+        // Verify credentials are actually working
         service_account.query_users(1).await?;
+
         Ok(service_account)
     }
 }

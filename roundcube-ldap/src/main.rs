@@ -64,7 +64,7 @@ impl giz_ldap_lib::interface::Target for Target {
             tracing::warn!("User {:?} has no main mail address set", user.id);
         }
 
-        if !mail_addresses.is_empty(){
+        if !mail_addresses.is_empty() {
             ldap_entry.set_attribute("mail", mail_addresses);
         }
 
