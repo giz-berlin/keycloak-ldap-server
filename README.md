@@ -28,15 +28,15 @@ Currently, this service is intended to provide the following use cases:
 
 To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
 and add it to the [workspace members](Cargo.toml).
-There, you should create a new implementation of the `giz-ldap-lib::dto::KeycloakAttributeExtractor` trait, which allows you to configure
-which Keycloak attributes will be exposed by the LDAP user and group entries.
+There, you should create a new implementation of the `giz_ldap_lib::interface::Target` trait, which allows you to configure
+which source (Keycloak) attributes will be exposed by the LDAP user and group entries.
 
 As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let include_group_info = true;
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakAttributeExtractor{}), include_group_info).await
+   giz_ldap_lib::server::start_ldap_server::<YourNewTarget>(include_group_info).await
 }
 ```
 

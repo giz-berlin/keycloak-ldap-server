@@ -8,15 +8,15 @@ pub const PRIMARY_GROUP_OBJECT_CLASS: &str = "groupOfUniqueNames";
 pub(crate) struct LdapEntryBuilder<T: crate::interface::Target> {
     base_distinguished_name: String,
     organization_name: String,
-    extractor: T,
+    target: T,
 }
 
 impl<T: crate::interface::Target> LdapEntryBuilder<T> {
-    pub fn new(base_distinguished_name: String, organization_name: String, extractor: T) -> Self {
+    pub fn new(base_distinguished_name: String, organization_name: String, target: T) -> Self {
         Self {
             base_distinguished_name,
             organization_name,
-            extractor,
+            target,
         }
     }
 
@@ -78,11 +78,11 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
                 "person".to_string(),
             ],
         );
-        // No matter the extractor, the LDAP specification says that we need to have an
+        // No matter the target, the LDAP specification says that we need to have an
         // attribute matching the identifier used in the dsn
         entry.set_attribute("cn", vec![user.id.clone()?]);
         let tracing_user_uid = user.id.clone();
-        if let Err(err) = self.extractor.extract_user(user, &mut entry) {
+        if let Err(err) = self.target.extract_user(user, &mut entry) {
             tracing::warn!("Extracting user id {tracing_user_uid:?} failed due to {err:?}");
         }
 
@@ -154,7 +154,7 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
         entry.set_attribute("uniqueMember", group_members);
 
         // Add custom fields
-        if let Err(e) = self.extractor.extract_group(group, &mut entry) {
+        if let Err(e) = self.target.extract_group(group, &mut entry) {
             tracing::warn!(group = entry.dn, error = %e, "Adding custom attributes to group failed");
         }
 

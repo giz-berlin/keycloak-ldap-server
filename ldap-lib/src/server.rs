@@ -122,7 +122,7 @@ pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: 
         None
     };
 
-    let attribute_extractor = T::new(config.clone())?;
+    let target = T::new(config.clone())?;
 
     let addr = net::SocketAddr::from_str(config.ldap_server.bind_address.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
@@ -139,7 +139,7 @@ pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: 
         ldap_entry_builder: crate::dto::LdapEntryBuilder::new(
             config.ldap_server.base_distinguished_name.clone(),
             config.ldap_server.organization_name.clone(),
-            attribute_extractor,
+            target,
         ),
     };
     let cache_registry = caching::registry::Registry::new(cache_configuration, caching::registry::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
