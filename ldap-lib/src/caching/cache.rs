@@ -182,8 +182,9 @@ impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
     /// of seconds, this implementation might still accept the - now invalid - old client authentication and
     /// reject the new authentication instead. However, this will last only a couple of seconds
     /// until the next registry entry sync, when we notice that the old password has become invalid.
-    pub fn check_password(&self, password: &str) -> Result<(), proto::LdapError> {
-        if crypto::util::fixed_time_eq(password.as_ref(), self.password.as_ref()) {
+    pub fn check_password(&self, supplied_password: &str) -> Result<(), proto::LdapError> {
+        // This implementation might reveal the length of the password, but as these credntials are Keycloak credentials, they have the same length anyways.
+        if supplied_password.len() == self.password.len() && constant_time_eq::constant_time_eq(supplied_password.as_ref(), self.password.as_ref()) {
             Ok(())
         } else {
             Err(proto::LdapError(
