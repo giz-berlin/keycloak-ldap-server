@@ -58,14 +58,14 @@ pub struct LdapServerConfig {
     pub(crate) organization_name: String,
     /// Bind address with port, e.g. [::]:3000
     pub(crate) bind_address: String,
-    /// Whether to disable the secure LDAP access and enable unencrytped access
+    /// Whether to disable the secure LDAP access and enable unencrypted access
     pub(crate) disable_ldaps: bool,
     /// The TLS certificate used by the LDAP server if LDAPS is enabled
     pub(crate) certificate: String,
     /// The TLS certificate private key used by the LDAP server if LDAPS is enabled
     pub(crate) certificate_key: String,
 
-    /// Time to wait before sending first response in a session in millisecondbecause some client implementations will miss the first response if it comes in too fast.
+    /// Time to wait before sending first response in a session in milliseconds because some client implementations will miss the first response if it comes in too fast.
     pub(crate) session_first_answer_delay_millis: u64,
 
     /// How often to update entries in the LDAP cache in seconds. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!
@@ -97,10 +97,8 @@ pub struct EmptyConfig {}
 #[derive(serde::Deserialize, Debug, Default)]
 pub struct SentryConfig {
     /// Sentry Data Source Name (DSN). Tells Sentry where to send events to so they're associated with the correct project.
-    /// Must be specified if Sentry is `active`.
     pub dsn: String,
     /// Tag specifying which context the service is running in (for example, development, production, ...).
-    /// Must be specified if Sentry is `active`.
     pub environment: String,
 }
 

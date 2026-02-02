@@ -8,10 +8,10 @@ pub trait Target: Send + Sync + Sized + 'static {
     /// May fail if some config is invalid.
     fn new(config: std::sync::Arc<crate::config::Config<Self::TargetConfig>>) -> anyhow::Result<Self>;
 
-    /// Add the desired user attributes to the Keycloak entry.
+    /// Add the desired user attributes to the LDAP entry.
     fn extract_user(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut crate::dto::LdapEntry) -> anyhow::Result<()>;
 
-    /// Add the desired group attributes to the Keycloak entry.
+    /// Add the desired group attributes to the LDAP entry.
     fn extract_group(&self, _group: keycloak::types::GroupRepresentation, _ldap_entry: &mut crate::dto::LdapEntry) -> anyhow::Result<()> {
         // Provide a default implementation here as not all clients want to deal with groups.
         Ok(())

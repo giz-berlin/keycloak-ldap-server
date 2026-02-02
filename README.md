@@ -74,14 +74,14 @@ base_distinguished_name = "dc=giz,dc=berlin"
 organization_name = "giz.berlin"
 # Optional, bind address with port
 bind_address = "[::]:3000"
-# Optional, whether to disable the secure LDAP access and enable unencrytped access
+# Optional, whether to disable the secure LDAP access and enable unencrypted access
 disable_ldaps = false
 # Optional, the TLS certificate used by the LDAP server if LDAPS is enabled
 certificate: "certificates/ldap.pem"
 # Optional, the TLS certificate private key used by the LDAP server if LDAPS is enabled
 certificate_key: "certificates/ldap.key"
 
-# Optional, time to wait before sending first response in a session in millisecondbecause some client implementations will miss the first response if it comes in too fast.
+# Optional, time to wait before sending first response in a session in milliseconds because some client implementations will miss the first response if it comes in too fast.
 session_first_answer_delay_millis = 0
 
 # Optional, how often to update entries in the LDAP cache in seconds. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!
