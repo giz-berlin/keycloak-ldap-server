@@ -2,7 +2,9 @@
 
 ## Run server
 
-`roundcube-ldap  --disable-ldaps --keycloak-address https://keycloak.giz.berlin/auth --session-first-answer-delay-millis 0`
+`roundcube-ldap --config example-config.toml`
+
+For configuration options, please check out [example-config.toml](./example-config.toml).
 
 ## Configuration
 
