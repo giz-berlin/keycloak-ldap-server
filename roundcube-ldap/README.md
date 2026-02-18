@@ -15,8 +15,6 @@ This section guides you through the necessary configuration required for both co
 1. Create a new confidential client
 1. Deactivate all authentication mechanisms except `Service-Account-Roles`
 1. Add these roles to the Service-Account-Roles
-    1. `query-users` from `realm-management`
-    1. `query-groups` from `realm-management`
     1. `view-users` from `realm-management`
 
 ### Roundcube
@@ -59,7 +57,8 @@ $config['ldap_public']['Keycloak'] = [
   'sort'           => 'displayName',
   'scope'          => 'sub',
   'filter'         => '(objectClass=inetOrgPerson)',
-  'fuzzy_search'   => true,  // server allows wildcard search
+  // server allows wildcard search
+  'fuzzy_search'   => true,
 
   'groups'  => [
     'base_dn'           => '',

@@ -35,7 +35,7 @@ pub struct KeycloakApiConfig {
     /// Keycloak realm to fetch the data from.
     pub realm: String,
     /// Whether to validate the server certificate of the external API.
-    /// Only disable for local development purposes!
+    /// Only enable this insecure disable switch for local development purposes!
     pub insecure_disable_tls_verification: bool,
 }
 

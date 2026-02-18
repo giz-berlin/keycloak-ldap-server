@@ -53,46 +53,7 @@ In order to build a docker container for your new use-case binary, modify the `p
 
 Configuration is handled via a toml file, which can be passed via the `--config` option to the binary.
 
-Available configuration options are:
-
-```toml
-[source.keycloak_api]
-url = "https://keycloak.giz.berlin/auth"
-realm = "giz-playground"
-# Optional, number of users fetched per request
-fetch_users_num = 20
-
-# Optional
-[sentry]
-dsn = "your-dsn"
-environment = "your-environment-this-binary-is-running-in"
-
-[ldap_server]
-# Optional, the base point of our LDAP tree
-base_distinguished_name = "dc=giz,dc=berlin"
-# Optional, the name of the organization as shown by the LDAP base entry
-organization_name = "giz.berlin"
-# Optional, bind address with port
-bind_address = "[::]:3000"
-# Optional, whether to disable the secure LDAP access and enable unencrypted access
-disable_ldaps = false
-# Optional, the TLS certificate used by the LDAP server if LDAPS is enabled
-certificate: "certificates/ldap.pem"
-# Optional, the TLS certificate private key used by the LDAP server if LDAPS is enabled
-certificate_key: "certificates/ldap.key"
-
-# Optional, time to wait before sending first response in a session in milliseconds because some client implementations will miss the first response if it comes in too fast.
-session_first_answer_delay_millis = 0
-
-# Optional, how often to update entries in the LDAP cache in seconds. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!
-cache_update_interval_secs = 60
-
-# How long to wait in seconds before pruning LDAP cache entries that are not being accessed.
-cache_entry_max_inactive_secs = 3600
-
-[target]
-# Depending on the API target (printer, Roundcube, Nextcloud), different target configuration options are available. Please check the corresponding Readme for their options.
-```
+Available configuration options are documented in [example-config.toml](./example-config.toml).
 
 This API can run with or without TLS (LDAPS), depending on whether `disable-ldaps` is configured. If you want to run it via TLS, you will need to generate a server certificate.
 
@@ -133,7 +94,7 @@ Substitute `{target_binary}` with the name of the use-case specific binary you w
   target/release/{target_binary}
   ```
 
-The API should now be available at `ldaps://0.0.0.0:3000`. To see all available, please check out [config.rs](./ldap-lib/src/config.rs).
+The API should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, please check out [config.rs](./ldap-lib/src/config.rs).
 
 If you want to run the API under the typical LDAPS port (636), you will need to have root permissions or
 [use some other way to bind to a privileged port](https://stackoverflow.com/questions/413807/is-there-a-way-for-non-root-processes-to-bind-to-privileged-ports-on-linux).
