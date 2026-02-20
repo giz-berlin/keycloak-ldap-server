@@ -15,7 +15,7 @@ use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{caching, dto, keycloak_service_account, proto, server, tls};
+use crate::{caching, keycloak_service_account, proto, server, tls};
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
@@ -23,66 +23,8 @@ use crate::{caching, dto, keycloak_service_account, proto, server, tls};
 /// The LDAP clients will authenticate with the credentials of a keycloak client and are thus shown the users this
 /// keycloak client has access to.
 struct CliArguments {
-    #[clap(long, short, default_value = "0.0.0.0:3000", help = "Bind address with port")]
-    bind_addr: String,
-
-    #[clap(long, default_value = "dc=giz,dc=berlin", help = "The base point of our LDAP tree")]
-    base_distinguished_name: String,
-
-    #[clap(long, default_value = "giz.berlin", help = "The name of the organization as shown by the LDAP base entry")]
-    organization_name: String,
-
-    #[clap(
-        long,
-        default_value = "false",
-        default_missing_value = "true",
-        help = "Whether this server is running via LDAPS or LDAP"
-    )]
-    disable_ldaps: bool,
-
-    #[clap(
-        long,
-        default_value = "certificates/ldap_keycloak_bridge.crt.pem",
-        help = "The TLS certificate used by the LDAP server if LDAPS is enabled"
-    )]
-    certificate: String,
-
-    #[clap(
-        long,
-        default_value = "certificates/ldap_keycloak_bridge.key.pem",
-        help = "The TLS certificate private key used by the LDAP server if LDAPS is enabled"
-    )]
-    certificate_key: String,
-
-    #[clap(long, default_value = "http://localhost:8080", help = "The address of the Keycloak server to fetch users from")]
-    keycloak_address: String,
-
-    #[clap(long, default_value = "giz_oidc", help = "The keycloak realm to fetch users from")]
-    keycloak_realm: String,
-
-    #[clap(short, long, default_value = "-1", help = "Number of users to fetch from keycloak")]
-    num_users: i32,
-
-    #[clap(
-        long,
-        default_value = "55",
-        help = "Time to wait before sending first response in a session, because some client implementations will miss the first response if it comes in too fast."
-    )]
-    session_first_answer_delay_millis: u64,
-
-    #[clap(
-        long,
-        default_value = "30",
-        help = "How often to update entries in the LDAP cache. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!"
-    )]
-    cache_update_interval_secs: u64,
-
-    #[clap(
-        long,
-        default_value = "3600",
-        help = "How long to wait before pruning LDAP cache entries that are not being accessed."
-    )]
-    cache_entry_max_inactive_secs: u64,
+    #[clap(long, short, default_value = "config.toml", help = "Path to the config file")]
+    config: std::path::PathBuf,
 
     #[clap(flatten)]
     log_level: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
@@ -121,11 +63,10 @@ impl Display for LdapClientSession {
 /// is expected to NOT do itself.
 ///
 /// As the concrete user and group information needed depends on the specific use case,
-/// this method accepts a [dto::KeycloakAttributeExtractor] implementation used to populate
-/// the LDAP entries.
+/// this method is templated via the Generic [Target](crate::interface::Target) interface.
 ///
 /// This method also allows configuring whether group information should be provided as well.
-pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttributeExtractor>, include_group_info: bool) -> anyhow::Result<()> {
+pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: bool) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
     tracing_subscriber::fmt()
@@ -142,26 +83,64 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttribu
         .with_line_number(true)
         .init();
 
-    let ssl_acceptor = if !args.disable_ldaps {
-        tracing::info!("Starting LDAPS interface ldaps://{} ...", args.bind_addr);
-        Some(tls::setup_tls(
-            std::path::PathBuf::from(args.certificate),
-            std::path::PathBuf::from(args.certificate_key),
-        )?)
+    let config = std::sync::Arc::new(crate::config::Config::<T::TargetConfig>::try_from(args.config)?);
+
+    tracing::debug!("Starting with {config:?}");
+
+    let _guard = if let Some(sentry_config) = config.sentry.as_ref() {
+        let dsn = sentry::types::Dsn::from_str(&sentry_config.dsn).map_err(|err| {
+            tracing::error!("Invalid Sentry DSN {}: {}", &sentry_config.dsn, err);
+            err
+        })?;
+
+        let guard = sentry::init(sentry::ClientOptions {
+            dsn: Some(dsn),
+            release: sentry::release_name!(),
+            environment: Some(sentry_config.environment.clone().into()),
+            attach_stacktrace: true,
+            trim_backtraces: true,
+            // TODO: We may not want to have all transactions and thus set this to a lower value.
+            // See https://docs.sentry.io/platforms/rust/tracing/
+            traces_sample_rate: 1.0,
+            in_app_include: vec!["kids"],
+            ..Default::default()
+        });
+
+        Some(guard)
     } else {
-        tracing::info!("Starting LDAP interface ldap://{} ...", args.bind_addr);
         None
     };
 
-    let addr = net::SocketAddr::from_str(args.bind_addr.as_str()).context("Could not parse LDAP server address")?;
+    let ssl_acceptor = if !config.ldap_server.disable_ldaps {
+        tracing::info!("Starting LDAPS interface ldaps://{} ...", config.ldap_server.bind_address);
+        Some(tls::setup_tls(
+            std::path::PathBuf::from(&config.ldap_server.certificate),
+            std::path::PathBuf::from(&config.ldap_server.certificate_key),
+        )?)
+    } else {
+        tracing::info!("Starting LDAP interface ldap://{} ...", config.ldap_server.bind_address);
+        None
+    };
+
+    let target = T::new(config.clone())?;
+
+    let addr = net::SocketAddr::from_str(config.ldap_server.bind_address.as_str()).context("Could not parse LDAP server address")?;
     let listener = tokio::net::TcpListener::bind(&addr).await.context("Could not bind to LDAP server address")?;
-    let cache_configuration = caching::configuration::Configuration {
-        keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(args.keycloak_address, args.keycloak_realm),
-        num_users_to_fetch: args.num_users,
+    let cache_configuration = caching::configuration::Configuration::<T> {
+        keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(
+            config.source.keycloak_api.url.clone(),
+            config.source.keycloak_api.realm.clone(),
+            config.source.keycloak_api.insecure_disable_tls_verification,
+        ),
+        num_users_to_fetch: config.source.fetch_users_num,
         include_group_info,
-        cache_update_interval: time::Duration::from_secs(args.cache_update_interval_secs),
-        max_entry_inactive_time: time::Duration::from_secs(args.cache_entry_max_inactive_secs),
-        ldap_entry_builder: dto::LdapEntryBuilder::new(args.base_distinguished_name, args.organization_name, attribute_extractor),
+        cache_update_interval: time::Duration::from_secs(config.ldap_server.cache_update_interval_secs),
+        max_entry_inactive_time: time::Duration::from_secs(config.ldap_server.cache_entry_max_inactive_secs),
+        ldap_entry_builder: crate::dto::LdapEntryBuilder::new(
+            config.ldap_server.base_distinguished_name.clone(),
+            config.ldap_server.organization_name.clone(),
+            target,
+        ),
     };
     let cache_registry = caching::registry::Registry::new(cache_configuration, caching::registry::REGISTRY_DEFAULT_HOUSEKEEPING_INTERVAL);
     let handler = Arc::from(proto::LdapHandler::new(cache_registry));
@@ -174,7 +153,7 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttribu
                     tcpstream,
                     ssl_acceptor.clone(),
                     client_socket_addr,
-                    time::Duration::from_millis(args.session_first_answer_delay_millis),
+                    time::Duration::from_millis(config.ldap_server.session_first_answer_delay_millis),
                 ));
             }
             Err(e) => {
@@ -188,8 +167,8 @@ pub async fn start_ldap_server(attribute_extractor: Box<dyn dto::KeycloakAttribu
 /// convert them into log messages.
 /// If a TLS acceptor has been passed in, interpret the TcpStream as a SslStream.
 /// Else, just use it as an unencrypted stream.
-async fn client_session(
-    ldap: Arc<proto::LdapHandler>,
+async fn client_session<T: crate::interface::Target>(
+    ldap: Arc<proto::LdapHandler<T>>,
     tcp_stream: tokio::net::TcpStream,
     ssl_acceptor: Option<SslAcceptor>,
     client_address: net::SocketAddr,
@@ -217,15 +196,16 @@ async fn client_session(
 }
 
 /// Handle receiving and sending of LDAP messages for a client session.
-async fn _client_session<T>(
+async fn _client_session<T, S>(
     session: &mut LdapClientSession,
-    ldap: Arc<proto::LdapHandler>,
-    stream: T,
+    ldap: Arc<proto::LdapHandler<T>>,
+    stream: S,
     client_address: net::SocketAddr,
     delay_before_first_answer: time::Duration,
 ) -> anyhow::Result<()>
 where
-    T: AsyncRead + AsyncWrite,
+    S: AsyncRead + AsyncWrite,
+    T: crate::interface::Target,
 {
     let (r, w) = tokio::io::split(stream);
     let mut ldap_reader = tokio_util::codec::FramedRead::new(r, LdapCodec::default());
@@ -254,7 +234,7 @@ where
                 tracing::debug!(msg_id, %session, operation = ?server_op, "Performing LDAP operation");
                 ldap.perform_ldap_operation(server_op, session).await
             }
-            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen(
+            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(
                 LdapResultCode::ProtocolError,
                 format!("Invalid Request in session {}: msg {}", session.id, msg_id).as_str(),
             )),

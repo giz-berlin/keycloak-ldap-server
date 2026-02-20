@@ -5,9 +5,15 @@ use anyhow::Context;
 use giz_ldap_lib::{dto, server};
 use keycloak::types::UserRepresentation;
 
-pub struct PrinterUserAttributeExtractor;
+pub struct Target;
 
-impl dto::KeycloakAttributeExtractor for PrinterUserAttributeExtractor {
+impl giz_ldap_lib::interface::Target for Target {
+    type TargetConfig = giz_ldap_lib::config::EmptyConfig;
+
+    fn new(_config: std::sync::Arc<giz_ldap_lib::config::Config<Self::TargetConfig>>) -> anyhow::Result<Self> {
+        Ok(Self {})
+    }
+
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("displayName", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
@@ -33,5 +39,5 @@ impl dto::KeycloakAttributeExtractor for PrinterUserAttributeExtractor {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server(Box::new(PrinterUserAttributeExtractor {}), false).await
+    server::start_ldap_server::<Target>(false).await
 }
