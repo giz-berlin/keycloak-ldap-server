@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use openssl::{
     pkey::{PKeyRef, Private},
     ssl::{SslAcceptor, SslFiletype, SslMethod},

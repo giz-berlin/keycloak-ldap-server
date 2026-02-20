@@ -1,11 +1,11 @@
 [package]
 name = "printer-ldap"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [dependencies]
-anyhow = "~1.0.95"
+anyhow = "~1.0.102"
 giz-ldap-lib = { path="../ldap-lib" }
-keycloak = "~25.0.400"
-tokio = { version = "~1.42.0", features = ["io-util"] }
+keycloak = "~26.5.200"
+tokio = { version = "~1.50.0", features = ["io-util"] }

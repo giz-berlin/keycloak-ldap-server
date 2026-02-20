@@ -1,0 +1,9 @@
+[source.keycloak_api]
+url = "http://keycloak:8080"
+realm = "giz_oidc"
+
+[ldap_server]
+certificate = "certificates/ldap_keycloak_bridge.crt.pem"
+certificate_key = "certificates/ldap_keycloak_bridge.key.pem"
+
+[target]

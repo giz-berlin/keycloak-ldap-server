@@ -1,0 +1,8 @@
+[source.keycloak_api]
+url = "http://keycloak:8080"
+realm = "giz_oidc"
+
+[ldap_server]
+disable_ldaps = true
+
+[target]

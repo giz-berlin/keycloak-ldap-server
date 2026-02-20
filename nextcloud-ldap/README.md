@@ -10,7 +10,7 @@ The `nextcloud-ldap` use case provides an LDAP proxy to Keycloak which exports t
 1. Enable `LDAP user and group backend` app in your Nextcloud.
 1. Configure the LDAP integration by following the official ["User authentication with LDAP"](https://docs.nextcloud.com/server/latest/admin_manual/configuration_user/user_auth_ldap.html) docs. You'll have to make the following settings:
     - **Server**
-        - **LDAP Port**: This is `3000` by default, unless you change the `bind-addr` setting.
+        - **LDAP Port**: This is `3000` by default, unless you change the `bind-address` setting.
         - **User DN**: Your Keycloak client ID
         - **Password**: Your Keycloak client secret
         - **Base DN**: The base DN you configured for the program which is `dc=giz,dc=berlin` by default
@@ -19,7 +19,7 @@ The `nextcloud-ldap` use case provides an LDAP proxy to Keycloak which exports t
     - **Login Attributes**
         - Hit `Edit LDAP Query` and enter `(&(&(|(objectclass=inetOrgPerson)))(&(entryuuid=%uid)(enabled=true)))` to ensure that only users which are enabled are allowed to log in. For example, this query is used when the OIDC plugin queries the user from the LDAP backend.
     - **Groups**
-        - **Only these object classes**: Nextcloud does not import groups by default so select `groupOfUniqueNames` here and Nextcloud will import them just fine. 
+        - **Only these object classes**: Nextcloud does not import groups by default so select `groupOfUniqueNames` here and Nextcloud will import them just fine.
     - **Advanced**
         - **Directory Settings**
             - **Disable users missing from LDAP**: Activate this to ensure that users missing from the LDAP, e.g. because they were disabled or deleted in Keycloak, are disabled in the Nextcloud.

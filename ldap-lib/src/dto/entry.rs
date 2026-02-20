@@ -1,7 +1,7 @@
 use std::{collections::HashMap, string::ToString};
 
 use itertools::Itertools;
-use ldap3_proto::{proto::LdapSubstringFilter, LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry, LdapSearchScope, SearchRequest};
+use ldap3_proto::{LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry, LdapSearchScope, SearchRequest, proto::LdapSubstringFilter};
 use regex::Regex;
 
 use crate::proto;
@@ -477,7 +477,7 @@ pub mod tests {
     }
 
     mod when_filtering {
-        use ldap3_proto::{proto::LdapMatchingRuleAssertion, LdapFilter};
+        use ldap3_proto::{LdapFilter, proto::LdapMatchingRuleAssertion};
 
         use super::*;
 
@@ -497,23 +497,31 @@ pub mod tests {
         #[rstest]
         fn then_and_filter_works_correctly(dummy_entry: LdapEntry) {
             // when & then
-            assert!(dummy_entry
-                .matches_filter(&LdapFilter::And(vec![matching_filter(), matching_filter(), matching_filter()]))
-                .unwrap());
-            assert!(!dummy_entry
-                .matches_filter(&LdapFilter::And(vec![matching_filter(), non_matching_filter(), matching_filter()]))
-                .unwrap());
+            assert!(
+                dummy_entry
+                    .matches_filter(&LdapFilter::And(vec![matching_filter(), matching_filter(), matching_filter()]))
+                    .unwrap()
+            );
+            assert!(
+                !dummy_entry
+                    .matches_filter(&LdapFilter::And(vec![matching_filter(), non_matching_filter(), matching_filter()]))
+                    .unwrap()
+            );
         }
 
         #[rstest]
         fn then_or_filter_works_correctly(dummy_entry: LdapEntry) {
             // when & then
-            assert!(!dummy_entry
-                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), non_matching_filter()]))
-                .unwrap());
-            assert!(dummy_entry
-                .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), matching_filter()]))
-                .unwrap());
+            assert!(
+                !dummy_entry
+                    .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), non_matching_filter()]))
+                    .unwrap()
+            );
+            assert!(
+                dummy_entry
+                    .matches_filter(&LdapFilter::Or(vec![non_matching_filter(), non_matching_filter(), matching_filter()]))
+                    .unwrap()
+            );
         }
 
         #[rstest]
@@ -559,15 +567,21 @@ pub mod tests {
             dummy_entry.set_attribute("attr", vec!["value".to_string()]);
 
             // when & then
-            assert!(dummy_entry
-                .matches_filter(&LdapFilter::Equality("attr".to_string(), "value".to_string()))
-                .unwrap());
-            assert!(!dummy_entry
-                .matches_filter(&LdapFilter::Equality("attr".to_string(), "other_value".to_string()))
-                .unwrap());
-            assert!(!dummy_entry
-                .matches_filter(&LdapFilter::Equality("other_attr".to_string(), "value".to_string()))
-                .unwrap());
+            assert!(
+                dummy_entry
+                    .matches_filter(&LdapFilter::Equality("attr".to_string(), "value".to_string()))
+                    .unwrap()
+            );
+            assert!(
+                !dummy_entry
+                    .matches_filter(&LdapFilter::Equality("attr".to_string(), "other_value".to_string()))
+                    .unwrap()
+            );
+            assert!(
+                !dummy_entry
+                    .matches_filter(&LdapFilter::Equality("other_attr".to_string(), "value".to_string()))
+                    .unwrap()
+            );
         }
 
         #[rstest]

@@ -28,26 +28,32 @@ Currently, this service is intended to provide the following use cases:
 
 To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
 and add it to the [workspace members](Cargo.toml).
-There, you should create a new implementation of the `giz-ldap-lib::dto::KeycloakAttributeExtractor` trait, which allows you to configure
-which Keycloak attributes will be exposed by the LDAP user and group entries.
+There, you should create a new implementation of the `giz_ldap_lib::interface::Target` trait, which allows you to configure
+which source (Keycloak) attributes will be exposed by the LDAP user and group entries.
 
 As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let include_group_info = true;
-    giz-ldap-lib::server::start_ldap_server(Box::new(YourKeycloakAttributeExtractor{}), include_group_info).await
+   giz_ldap_lib::server::start_ldap_server::<YourNewTarget>(include_group_info).await
 }
 ```
 
 See [the printer-specific implementation](printer-ldap) for an example.
 
-NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`), 
+NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`),
 this service REPLACES all `/` characters in a group name with `_`.
 
 In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
 
 ### Running the API
+
+### Configuration
+
+Configuration is handled via a toml file, which can be passed via the `--config` option to the binary.
+
+Available configuration options are documented in [example-config.toml](./example-config.toml).
 
 This API can run with or without TLS (LDAPS), depending on whether `disable-ldaps` is configured. If you want to run it via TLS, you will need to generate a server certificate.
 
@@ -88,7 +94,7 @@ Substitute `{target_binary}` with the name of the use-case specific binary you w
   target/release/{target_binary}
   ```
 
-The API should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, use the `--help` flag.
+The API should now be available at `ldaps://0.0.0.0:3000`. To see all available configuration options, please check out [config.rs](./ldap-lib/src/config.rs).
 
 If you want to run the API under the typical LDAPS port (636), you will need to have root permissions or
 [use some other way to bind to a privileged port](https://stackoverflow.com/questions/413807/is-there-a-way-for-non-root-processes-to-bind-to-privileged-ports-on-linux).
@@ -99,7 +105,7 @@ The default log level of this API is INFO, while log message of crates we depend
 You can enable more verbose logging via the `-v` flag (DEBUG), or the `-vv` flag (TRACE).
 
 Additionally, you may configure the logging (for the whole API, certain submodules or dependencies)
-on a more granular level using the `RUST_LOG` environment variable 
+on a more granular level using the `RUST_LOG` environment variable
 (see [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) for required syntax.)
 
 ### Manual testing

@@ -1,0 +1,14 @@
+[source.keycloak_api]
+url = "https://keycloak.giz.berlin/auth"
+realm = "giz-playground"
+
+[ldap_server]
+# check out general options in main Readme.
+
+[target]
+# Optional, default shown here
+james_list_attr = "james-list"
+# Optional, default shown here
+james_team_attr = "james-team"
+# Optional, default shown here
+james_alias_attr = "james-alias"

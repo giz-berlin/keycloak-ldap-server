@@ -1,5 +1,5 @@
 [package]
-name = "nextcloud-ldap"
+name = "roundcube-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -8,4 +8,6 @@ publish = false
 anyhow = "~1.0.102"
 giz-ldap-lib = { path="../ldap-lib" }
 keycloak = "~26.5.200"
+serde = { version = "1.0.218", features = ["serde_derive"] }
 tokio = { version = "~1.50.0", features = ["io-util"] }
+tracing = "0.1.41"
