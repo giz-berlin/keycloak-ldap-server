@@ -98,7 +98,6 @@ pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: 
             release: sentry::release_name!(),
             environment: Some(sentry_config.environment.clone().into()),
             attach_stacktrace: true,
-            trim_backtraces: true,
             // TODO: We may not want to have all transactions and thus set this to a lower value.
             // See https://docs.sentry.io/platforms/rust/tracing/
             traces_sample_rate: 1.0,
