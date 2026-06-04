@@ -1,5 +1,6 @@
 #![deny(warnings)]
 #![deny(clippy::all)]
+#![allow(clippy::collapsible_match)]
 #![cfg_attr(test, allow(dead_code, non_snake_case))]
 mod caching;
 pub mod config;

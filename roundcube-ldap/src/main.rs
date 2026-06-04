@@ -40,18 +40,29 @@ impl giz_ldap_lib::interface::Target for Target {
             anyhow::bail!("User disabled!")
         }
 
-        let mut given_name = user.first_name.unwrap_or("".to_string());
-        let surname = user.last_name.unwrap_or("".to_string());
         // We would really like to have a name for the user so that the client can know who they
         // are dealing with. However, it is not guaranteed that both values are set.
-        if given_name == "" && surname == "" {
-            given_name = user.username.clone().expect("User has no names and no user name");
-            ldap_entry.set_attribute("displayName", vec![given_name.clone()]);
-        } else {
-            ldap_entry.set_attribute("displayName", vec![format!("{given_name} {surname}")]);
+        match (user.first_name, user.last_name) {
+            (Some(first_name), Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![format!("{first_name} {last_name}")]);
+                ldap_entry.set_attribute("givenName", vec![first_name]);
+                ldap_entry.set_attribute("surname", vec![last_name]);
+            }
+            (Some(first_name), None) => {
+                ldap_entry.set_attribute("displayName", vec![first_name.clone()]);
+                ldap_entry.set_attribute("givenName", vec![first_name]);
+            }
+            (None, Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![last_name.clone()]);
+                ldap_entry.set_attribute("surname", vec![last_name]);
+            }
+            (None, None) => {
+                // Use the preferred username if no name component is present
+                let username = user.username.clone().expect("User has no names and no username");
+                ldap_entry.set_attribute("displayName", vec![username.clone()]);
+                ldap_entry.set_attribute("givenName", vec![username]);
+            }
         }
-        ldap_entry.set_attribute("givenName", vec![given_name]);
-        ldap_entry.set_attribute("surname", vec![surname]);
 
         let mut mail_addresses = vec![];
 
