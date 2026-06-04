@@ -7,8 +7,8 @@ realm = "giz-playground"
 
 [target]
 # Optional, default shown here
-james_list_attr = "james-list"
+james_list_attr = "jamesList"
 # Optional, default shown here
-james_team_attr = "james-team"
+james_team_attr = "jamesTeam"
 # Optional, default shown here
-james_alias_attr = "james-alias"
+james_alias_attr = "jamesAlias"

@@ -16,9 +16,9 @@ pub struct RoundcubeConfig {
 impl Default for RoundcubeConfig {
     fn default() -> Self {
         Self {
-            james_list_attr: "james-list".to_string(),
-            james_team_attr: "james-team".to_string(),
-            james_alias_attr: "james-alias".to_string(),
+            james_list_attr: "jamesList".to_string(),
+            james_team_attr: "jamesTeam".to_string(),
+            james_alias_attr: "jamesAlias".to_string(),
         }
     }
 }
