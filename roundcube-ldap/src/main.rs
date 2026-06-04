@@ -40,11 +40,16 @@ impl giz_ldap_lib::interface::Target for Target {
             anyhow::bail!("User disabled!")
         }
 
-        let given_name = user.first_name.unwrap_or("".to_string());
+        let mut given_name = user.first_name.unwrap_or("".to_string());
+        let surname = user.last_name.unwrap_or("".to_string());
         // We would really like to have a name for the user so that the client can know who they
-        // are dealing with.
-        let surname = user.last_name.context("last name missing")?;
-        ldap_entry.set_attribute("displayName", vec![format!("{given_name} {surname}")]);
+        // are dealing with. However, it is not guaranteed that both values are set.
+        if given_name == "" && surname == "" {
+            given_name = user.username.clone().expect("User has no names and no user name");
+            ldap_entry.set_attribute("displayName", vec![given_name.clone()]);
+        } else {
+            ldap_entry.set_attribute("displayName", vec![format!("{given_name} {surname}")]);
+        }
         ldap_entry.set_attribute("givenName", vec![given_name]);
         ldap_entry.set_attribute("surname", vec![surname]);
 
