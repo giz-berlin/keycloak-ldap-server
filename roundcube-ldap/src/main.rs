@@ -16,9 +16,9 @@ pub struct RoundcubeConfig {
 impl Default for RoundcubeConfig {
     fn default() -> Self {
         Self {
-            james_list_attr: "james-list".to_string(),
-            james_team_attr: "james-team".to_string(),
-            james_alias_attr: "james-alias".to_string(),
+            james_list_attr: "jamesList".to_string(),
+            james_team_attr: "jamesTeam".to_string(),
+            james_alias_attr: "jamesAlias".to_string(),
         }
     }
 }
@@ -40,13 +40,29 @@ impl giz_ldap_lib::interface::Target for Target {
             anyhow::bail!("User disabled!")
         }
 
-        let given_name = user.first_name.unwrap_or("".to_string());
         // We would really like to have a name for the user so that the client can know who they
-        // are dealing with.
-        let surname = user.last_name.context("last name missing")?;
-        ldap_entry.set_attribute("displayName", vec![format!("{given_name} {surname}")]);
-        ldap_entry.set_attribute("givenName", vec![given_name]);
-        ldap_entry.set_attribute("surname", vec![surname]);
+        // are dealing with. However, it is not guaranteed that both values are set.
+        match (user.first_name, user.last_name) {
+            (Some(first_name), Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![format!("{first_name} {last_name}")]);
+                ldap_entry.set_attribute("givenName", vec![first_name]);
+                ldap_entry.set_attribute("surname", vec![last_name]);
+            }
+            (Some(first_name), None) => {
+                ldap_entry.set_attribute("displayName", vec![first_name.clone()]);
+                ldap_entry.set_attribute("givenName", vec![first_name]);
+            }
+            (None, Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![last_name.clone()]);
+                ldap_entry.set_attribute("surname", vec![last_name]);
+            }
+            (None, None) => {
+                // Use the preferred username if no name component is present
+                let username = user.username.clone().expect("User has no names and no username");
+                ldap_entry.set_attribute("displayName", vec![username.clone()]);
+                ldap_entry.set_attribute("givenName", vec![username]);
+            }
+        }
 
         let mut mail_addresses = vec![];
 

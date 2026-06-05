@@ -51,7 +51,7 @@ impl<T: crate::interface::Target> LdapHandler<T> {
                     .await
                     .map(LdapResponseState::MultiPartRespond)
                     .unwrap_or_else(|e| {
-                        tracing::error!(%session, msg = sr.msgid, error = ?e, "Error performing search request");
+                        tracing::error!(%session, search_request = ?sr, error = ?e, "Error performing search request");
                         if let LdapResultCode::InvalidCredentials = e.0 {
                             LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(e.0, e.1.as_str()))
                         } else {

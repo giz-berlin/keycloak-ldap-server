@@ -84,6 +84,7 @@ impl<T: crate::interface::Target> LdapEntryBuilder<T> {
         let tracing_user_uid = user.id.clone();
         if let Err(err) = self.target.extract_user(user, &mut entry) {
             tracing::warn!("Extracting user id {tracing_user_uid:?} failed due to {err:?}");
+            return None;
         }
 
         Some(entry)
