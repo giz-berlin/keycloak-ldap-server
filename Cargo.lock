@@ -3689,6 +3689,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zammad-ldap"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "giz-ldap-lib",
+ "keycloak",
+ "tokio",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"

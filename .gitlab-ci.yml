@@ -9,6 +9,7 @@ stages:
   - printer-ldap
   - nextcloud-ldap
   - roundcube-ldap
+  - zammad-ldap
 
 .build_matrix: &build_matrix
   parallel:

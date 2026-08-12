@@ -33,4 +33,4 @@ cache_update_interval_secs = 60
 cache_entry_max_inactive_secs = 3600
 
 [target]
-# Depending on the API target (printer, Roundcube, Nextcloud), different target configuration options are available. Please check the corresponding Readme for their options.
+# Depending on the API target (printer, Roundcube, Nextcloud, Zammad), different target configuration options are available. Please check the corresponding Readme for their options.
