@@ -23,6 +23,7 @@ Currently, this service is intended to provide the following use cases:
 - providing an address book, for example to mail clients
 - [implemented] informing the NextCloud about active users, so that deactivated users can be removed
 - informing the locking system about user roles/group memberships
+- [implemented] informing Zammad about active users and their groups for a role sync
 
 ### Creating a binary for a new use case
 

@@ -4,6 +4,7 @@
 #![cfg_attr(test, allow(dead_code, non_snake_case))]
 mod caching;
 pub mod config;
+pub mod constants;
 pub mod dto;
 pub mod interface;
 mod keycloak_service_account;

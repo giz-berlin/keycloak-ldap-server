@@ -138,8 +138,10 @@ mod test {
     const REGISTRY_HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(40);
 
     #[fixture]
-    fn registry(#[default(false)] include_group_info: bool) -> Arc<Registry<crate::interface::tests::DummyTarget>> {
-        Registry::new(cache::test::config(include_group_info), REGISTRY_HOUSEKEEPING_INTERVAL)
+    fn registry(
+        #[default(crate::constants::GroupStrategy::NoGroupInfo)] group_strategy: crate::constants::GroupStrategy,
+    ) -> Arc<Registry<crate::interface::tests::DummyTarget>> {
+        Registry::new(cache::test::config(group_strategy), REGISTRY_HOUSEKEEPING_INTERVAL)
     }
 
     mod cache_registry {

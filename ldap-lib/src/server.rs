@@ -66,7 +66,7 @@ impl Display for LdapClientSession {
 /// this method is templated via the Generic [Target](crate::interface::Target) interface.
 ///
 /// This method also allows configuring whether group information should be provided as well.
-pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: bool) -> anyhow::Result<()> {
+pub async fn start_ldap_server<T: crate::interface::Target>(group_strategy: crate::constants::GroupStrategy) -> anyhow::Result<()> {
     let args = server::CliArguments::parse();
 
     tracing_subscriber::fmt()
@@ -132,7 +132,7 @@ pub async fn start_ldap_server<T: crate::interface::Target>(include_group_info: 
             config.source.keycloak_api.insecure_disable_tls_verification,
         ),
         num_users_to_fetch: config.source.fetch_users_num,
-        include_group_info,
+        group_strategy,
         cache_update_interval: time::Duration::from_secs(config.ldap_server.cache_update_interval_secs),
         max_entry_inactive_time: time::Duration::from_secs(config.ldap_server.cache_entry_max_inactive_secs),
         ldap_entry_builder: crate::dto::LdapEntryBuilder::new(

@@ -19,6 +19,12 @@ pub struct KeycloakClientLdapCache<T: crate::interface::Target> {
     root: tokio::sync::RwLock<dto::LdapEntry>,
 }
 
+struct KeycloakGroup {
+    group: keycloak::types::GroupRepresentation,
+    users: Vec<keycloak::types::UserRepresentation>,
+    sub_groups: Vec<Self>,
+}
+
 impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
     /// Construct a new client cache.
     ///
@@ -98,7 +104,7 @@ impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
             .filter_map(|user| Some((user.id.clone()?, self.configuration.ldap_entry_builder.build_from_keycloak_user(user)?)))
             .collect();
 
-        if self.configuration.include_group_info {
+        if self.configuration.group_strategy != crate::constants::GroupStrategy::NoGroupInfo {
             let groups: Vec<keycloak::types::GroupRepresentation> = self.service_account_client.query_named_groups().await?;
             for group in groups.into_iter() {
                 let group_entry = self.fetch_group(group, None, &mut users).await?;
@@ -115,16 +121,22 @@ impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
         Ok(())
     }
 
+    /// Fetch Keycloak info for all groups before mapping to LDAP.
+    /// This allows us to include subgroup information also in parent groups.
+    ///
+    /// We use this when including subgroup users in all of their parents
+    /// when using [SubgroupMembers](crate::constants::GroupStrategy::SubgroupMembers) as [group strategy](configuration::Configuration::group_strategy).
     #[async_recursion::async_recursion]
-    async fn fetch_group(
-        &self,
-        group: keycloak::types::GroupRepresentation,
-        parent_group: Option<&dto::LdapEntry>,
-        users: &mut std::collections::HashMap<String, dto::LdapEntry>,
-    ) -> Result<dto::LdapEntry, proto::LdapError> {
+    async fn fetch_group_keycloak(&self, group: keycloak::types::GroupRepresentation) -> Result<KeycloakGroup, proto::LdapError> {
         // We can unwrap here because we made sure to filter out groups without a id
         let group_id = group.id.as_ref().unwrap();
-        let group_associated_users = self.service_account_client.query_users_in_group(group_id).await?;
+        let mut group_associated_users = self
+            .service_account_client
+            .query_users_in_group(group_id)
+            .await?
+            .into_iter()
+            .map(|user| (user.id.clone(), user))
+            .collect::<std::collections::HashMap<_, _>>();
 
         let subgroup_count = group.sub_group_count.unwrap_or(0);
         let sub_groups = if subgroup_count > 0 {
@@ -132,18 +144,55 @@ impl<T: crate::interface::Target> KeycloakClientLdapCache<T> {
         } else {
             Vec::new()
         };
+        let sub_groups = {
+            let mut converted_sub_groups = vec![];
+            for sub_group in sub_groups {
+                let sub_group = self.fetch_group_keycloak(sub_group).await?;
+                if self.configuration.group_strategy == crate::constants::GroupStrategy::SubgroupMembers {
+                    group_associated_users.extend(sub_group.users.iter().cloned().map(|user| (user.id.clone(), user)));
+                }
+                converted_sub_groups.push(sub_group);
+            }
+            converted_sub_groups
+        };
+        Ok(KeycloakGroup {
+            group,
+            sub_groups,
+            users: group_associated_users.into_values().collect(),
+        })
+    }
 
+    #[async_recursion::async_recursion]
+    async fn map_group_ldap(
+        &self,
+        group: KeycloakGroup,
+        parent_group: Option<&dto::LdapEntry>,
+        users: &mut std::collections::HashMap<String, dto::LdapEntry>,
+    ) -> Result<dto::LdapEntry, proto::LdapError> {
         let mut ldap_group =
             self.configuration
                 .ldap_entry_builder
-                .build_from_keycloak_group_with_associated_users(group, parent_group, users, &group_associated_users);
+                .build_from_keycloak_group_with_associated_users(group.group, parent_group, users, &group.users);
 
-        for sub_group in sub_groups.into_iter() {
-            let ldap_sub_group = self.fetch_group(sub_group, Some(&ldap_group), users).await?;
+        for sub_group in group.sub_groups.into_iter() {
+            let ldap_sub_group = self.map_group_ldap(sub_group, Some(&ldap_group), users).await?;
             ldap_group.add_subordinate(ldap_sub_group);
         }
 
         Ok(ldap_group)
+    }
+
+    async fn fetch_group(
+        &self,
+        group: keycloak::types::GroupRepresentation,
+        parent_group: Option<&dto::LdapEntry>,
+        users: &mut std::collections::HashMap<String, dto::LdapEntry>,
+    ) -> Result<dto::LdapEntry, proto::LdapError> {
+        let group = self.fetch_group_keycloak(group).await?;
+
+        let ldap_entry = self.map_group_ldap(group, parent_group, users).await?;
+
+        Ok(ldap_entry)
     }
 
     /// Launch a new task responsible for periodically syncing the cache data from keycloak.
@@ -219,11 +268,13 @@ pub(crate) mod test {
     pub const MAX_ENTRY_INACTIVE_TIME: Duration = Duration::from_secs(60);
 
     #[fixture]
-    pub fn config(#[default(false)] include_group_info: bool) -> configuration::Configuration<crate::interface::tests::DummyTarget> {
+    pub fn config(
+        #[default(crate::constants::GroupStrategy::NoGroupInfo)] group_strategy: crate::constants::GroupStrategy,
+    ) -> configuration::Configuration<crate::interface::tests::DummyTarget> {
         configuration::Configuration {
             keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
             num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
-            include_group_info,
+            group_strategy,
             cache_update_interval: CACHE_UPDATE_INTERVAL,
             max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,
             ldap_entry_builder: proto::tests::ldap_entry_builder(),
