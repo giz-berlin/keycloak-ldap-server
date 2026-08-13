@@ -136,14 +136,14 @@ pub mod tests {
     #[fixture]
     async fn cache_registry(
         #[default(true)] register_default_client: bool,
-        #[default(false)] include_group_info: bool,
+        #[default(crate::constants::GroupStrategy::NoGroupInfo)] group_strategy: crate::constants::GroupStrategy,
         ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
     ) -> Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>> {
         let cache = caching::registry::Registry::new(
             caching::configuration::Configuration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
                 num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
-                include_group_info,
+                group_strategy,
                 cache_update_interval: Duration::from_secs(30),
                 max_entry_inactive_time: Duration::from_secs(60 * 60),
                 ldap_entry_builder,
@@ -527,7 +527,7 @@ pub mod tests {
             #[tokio::test]
             async fn then_do_return_groups(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
@@ -555,7 +555,7 @@ pub mod tests {
             #[tokio::test]
             async fn by_group_objectclass__then_only_return_groups(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
@@ -584,7 +584,7 @@ pub mod tests {
             #[tokio::test]
             async fn by_user_objectclass__then_only_return_users(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
             ) {
                 // given
@@ -612,7 +612,7 @@ pub mod tests {
             #[tokio::test]
             async fn then_assign_users_to_groups(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
                 ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
@@ -648,7 +648,7 @@ pub mod tests {
             #[tokio::test]
             async fn then_assign_groups_to_users(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
                 ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
@@ -684,7 +684,7 @@ pub mod tests {
             #[tokio::test]
             async fn then_return_subgroups(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
                 ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
@@ -717,7 +717,7 @@ pub mod tests {
             #[tokio::test]
             async fn then_build_full_subgroup_hierarchy(
                 #[future]
-                #[with(true, true)]
+                #[with(true, crate::constants::GroupStrategy::DirectMembers)]
                 cache_registry: Arc<caching::registry::Registry<crate::interface::tests::DummyTarget>>,
                 ldap_entry_builder: dto::LdapEntryBuilder<crate::interface::tests::DummyTarget>,
             ) {
