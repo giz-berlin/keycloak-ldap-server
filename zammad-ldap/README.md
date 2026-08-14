@@ -13,7 +13,7 @@ The `zammad-ldap` use case provides an LDAP proxy to Keycloak which exports the 
 1. Choose a name for the source and set the domain of your LDAP bridge host. Then click `Connect`.
 1. Set `dc=giz,dc=berlin` as the `Base DN`. Set the Keycloak client's name as `Bind User` and its client secret as `Bind Password`.
 1. Configure the matching of LDAP attributes to Zammad attributes to your liking. Make sure to configure `mail` as the source for `Login`.
-1. Select which Keycloak groups (identified by their ID) provide which Role. Normally you want to include the hierarchy to allow users of a subgroup to also get the Role associated with the parent group.
+1. Select which Keycloak groups (identified by their ID) provide which Role. Set `Include Nested` to `No`. Normally you would want to include the hierarchy to allow users of a subgroup to also get the Role associated with the parent group. This behaviour is not properly working, though, in Zammad. We thus use a mode of the LDAP bridge that includes all users in all parent groups. Thus, setting this to `Yes` might lead to confusion in case Zammad fixes their nested groups feature.
 1. Complete the dialog and wait for the sync to finish.
 
 ### User Deactivation
