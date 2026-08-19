@@ -46,5 +46,5 @@ impl giz_ldap_lib::interface::Target for Target {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(giz_ldap_lib::constants::GroupStrategy::DirectMembers).await
+    server::start_ldap_server::<Target>(giz_ldap_lib::constants::GroupStrategy::SubgroupMembers).await
 }
