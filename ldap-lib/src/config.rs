@@ -20,13 +20,13 @@ pub struct Config<T> {
 }
 
 #[derive(serde::Deserialize, Debug, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SourceConfig {
     pub keycloak_api: KeycloakApiConfig,
 }
 
 #[derive(serde::Deserialize, Debug)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct KeycloakApiConfig {
     /// Address of the external Keycloak to fetch data from.
     pub url: String,
@@ -48,7 +48,7 @@ impl Default for KeycloakApiConfig {
 }
 
 #[derive(serde::Deserialize, Debug)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LdapServerConfig {
     /// The base point of our LDAP tree
     pub(crate) base_distinguished_name: String,
@@ -90,9 +90,11 @@ impl Default for LdapServerConfig {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct EmptyConfig {}
 
 #[derive(serde::Deserialize, Debug, Default)]
+#[serde(deny_unknown_fields)]
 pub struct SentryConfig {
     /// Sentry Data Source Name (DSN). Tells Sentry where to send events to so they're associated with the correct project.
     pub dsn: String,
