@@ -41,7 +41,7 @@ impl ServiceAccountClientBuilder {
         );
 
         // Verify credentials are actually working
-        service_account.query_users(1).await?;
+        service_account.count_users().await?;
 
         Ok(service_account)
     }
@@ -68,17 +68,9 @@ mod client {
         }
 
         /// Convert a keycloakError into an appropriate LdapError.
-        /// Also use the provided filter function to remove unwanted results from the resource data.
-        fn error_convert_and_filter<Resource, Filter>(
-            resource_name: &str,
-            data: Result<Vec<Resource>, keycloak::KeycloakError>,
-            filter: Filter,
-        ) -> Result<Vec<Resource>, proto::LdapError>
-        where
-            Filter: Fn(&Resource) -> bool,
-        {
+        fn error_convert_resource<Resource>(resource_name: &str, data: Result<Resource, keycloak::KeycloakError>) -> Result<Resource, proto::LdapError> {
             match data {
-                Ok(resource) => Ok(resource.into_iter().filter(filter).collect()),
+                Ok(resource) => Ok(resource),
                 Err(keycloak::KeycloakError::ReqwestFailure(_)) => {
                     Err(proto::LdapError(LdapResultCode::Unavailable, "Could not connect to keycloak.".to_string()))
                 }
@@ -92,15 +84,31 @@ mod client {
             }
         }
 
+        /// Convert a keycloakError into an appropriate LdapError.
+        /// Also use the provided filter function to remove unwanted results from the resource data.
+        fn error_convert_vec_and_filter<Resource, Filter>(
+            resource_name: &str,
+            data: Result<Vec<Resource>, keycloak::KeycloakError>,
+            filter: Filter,
+        ) -> Result<Vec<Resource>, proto::LdapError>
+        where
+            Filter: Fn(&Resource) -> bool,
+        {
+            Ok(Self::error_convert_resource(resource_name, data)?.into_iter().filter(filter).collect())
+        }
+
         /// Unconditionally retain the resource entry.
         fn retain_everything<Resource>(_: &Resource) -> bool {
             true
         }
 
         /// Query users of realm we configured for this client. Will not perform any pagination,
-        /// so make sure the size_limit you pass is high enough to allow for all users to be returned.
-        pub async fn query_users(&self, size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            ServiceAccountClient::error_convert_and_filter(
+        /// therefore magic `-1` is being used to fetch all users at once.
+        ///
+        /// This apporach prevents pagination issues like omitted users when a user gets deleted during
+        /// execution of subsequent requests.
+        pub async fn query_users(&self) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
+            ServiceAccountClient::error_convert_vec_and_filter(
                 "users",
                 self.client
                     .realm_users_get(
@@ -115,7 +123,8 @@ mod client {
                         None,
                         None,
                         None,
-                        Some(size_limit),
+                        // see https://github.com/keycloak/keycloak/blob/cd9345bc710345293b5e8be83077a4e99e274955/model/jpa/src/main/java/org/keycloak/models/jpa/PaginationUtils.java#L36 for relevant code path
+                        Some(-1),
                         None,
                         None,
                         None,
@@ -125,9 +134,22 @@ mod client {
             )
         }
 
+        /// Count users, should return total number of users of `query_users`.
+        ///
+        /// Beware: Doing both requests subsequently could mean they are out of sync as other, modifying requests
+        /// might be done in between.
+        pub async fn count_users(&self) -> Result<i32, proto::LdapError> {
+            ServiceAccountClient::error_convert_resource(
+                "users/count",
+                self.client
+                    .realm_users_count_get(&self.target_realm, None, None, None, None, None, None, None, None, None, None, None)
+                    .await,
+            )
+        }
+
         /// Query all groups in realm we configured for this client, disregarding groups that do not have an id or a name.
         pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
-            ServiceAccountClient::error_convert_and_filter(
+            ServiceAccountClient::error_convert_vec_and_filter(
                 "groups",
                 self.client
                     .realm_groups_get(&self.target_realm, Some(false), None, None, None, Some(true), None, None, None)
@@ -138,7 +160,7 @@ mod client {
 
         /// Query subgroups for a group.
         pub async fn query_sub_groups(&self, group_id: &str) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {
-            ServiceAccountClient::error_convert_and_filter(
+            ServiceAccountClient::error_convert_vec_and_filter(
                 "sub_groups",
                 self.client
                     .realm_groups_with_group_id_children_get(&self.target_realm, group_id, Some(true), None, None, Some(-1), None, None)
@@ -149,7 +171,7 @@ mod client {
 
         /// Query users belonging to a group.
         pub async fn query_users_in_group(&self, group_id: &str) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
-            ServiceAccountClient::error_convert_and_filter(
+            ServiceAccountClient::error_convert_vec_and_filter(
                 "users_in_group",
                 self.client
                     .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, None)
@@ -324,7 +346,7 @@ pub mod client {
             _ = lock_ignoring_poison!(self.err_code).insert(code);
         }
 
-        pub async fn query_users(&self, _size_limit: i32) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
+        pub async fn query_users(&self) -> Result<Vec<keycloak::types::UserRepresentation>, proto::LdapError> {
             if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
                 return Err(proto::LdapError(err_code.clone(), "".to_string()));
             }
@@ -338,6 +360,15 @@ pub mod client {
                     ..Default::default()
                 })
                 .collect())
+        }
+
+        pub async fn count_users(&self) -> Result<i32, proto::LdapError> {
+            if let Some(err_code) = lock_ignoring_poison!(self.err_code).as_ref() {
+                return Err(proto::LdapError(err_code.clone(), "".to_string()));
+            }
+
+            *lock_ignoring_poison!(self.call_count) += 1;
+            Ok(self.user_ids.iter().count().try_into().unwrap())
         }
 
         pub async fn query_named_groups(&self) -> Result<Vec<keycloak::types::GroupRepresentation>, proto::LdapError> {

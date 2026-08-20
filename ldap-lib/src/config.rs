@@ -23,8 +23,6 @@ pub struct Config<T> {
 #[serde(default)]
 pub struct SourceConfig {
     pub keycloak_api: KeycloakApiConfig,
-    /// Number of users to fetch from Keycloak per request.
-    pub fetch_users_num: Option<i32>,
 }
 
 #[derive(serde::Deserialize, Debug)]

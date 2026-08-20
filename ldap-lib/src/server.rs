@@ -131,7 +131,6 @@ pub async fn start_ldap_server<T: crate::interface::Target>(group_strategy: crat
             config.source.keycloak_api.realm.clone(),
             config.source.keycloak_api.insecure_disable_tls_verification,
         ),
-        num_users_to_fetch: config.source.fetch_users_num,
         group_strategy,
         cache_update_interval: time::Duration::from_secs(config.ldap_server.cache_update_interval_secs),
         max_entry_inactive_time: time::Duration::from_secs(config.ldap_server.cache_entry_max_inactive_secs),

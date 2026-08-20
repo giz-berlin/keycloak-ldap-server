@@ -142,7 +142,6 @@ pub mod tests {
         let cache = caching::registry::Registry::new(
             caching::configuration::Configuration {
                 keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
-                num_users_to_fetch: Some(test_constants::DEFAULT_NUM_USERS_TO_FETCH),
                 group_strategy,
                 cache_update_interval: Duration::from_secs(30),
                 max_entry_inactive_time: Duration::from_secs(60 * 60),

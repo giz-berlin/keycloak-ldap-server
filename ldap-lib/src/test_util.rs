@@ -8,7 +8,6 @@ pub mod test_constants {
     pub const ANOTHER_USER_ID: &str = "4n0th3r-us3r";
     pub const DEFAULT_GROUP_ID: &str = "d3f4ult_gr0up";
     pub const ANOTHER_GROUP_ID: &str = "4n0th3r-gr0up";
-    pub const DEFAULT_NUM_USERS_TO_FETCH: i32 = 5;
 }
 
 #[cfg(test)]
