@@ -23,7 +23,10 @@ The `nextcloud-ldap` use case provides an LDAP proxy to Keycloak which exports t
     - **Advanced**
         - **Directory Settings**
             - **Disable users missing from LDAP**: Activate this to ensure that users missing from the LDAP, e.g. because they were disabled or deleted in Keycloak, are disabled in the Nextcloud.
-            - **Group Display Name Field**: Set this to `fullname` to show the groups including their full path in Keycloak
+            - **Group Display Name Field**: Set this to `displayName` (should be the default) to show the groups including their full path in Keycloak
+            - **Group-Member association**: `uniqueMember`
+            - **Nested Groups**: yes
+            - **Special Attributes**: 
 1. In both the **Users** and the **Groups** tab, hit the "Verify settings and count" button and verify that the number of entities found matches with what you have in your Keycloak. Additionally, visit the "Accounts" page to find all of your users and groups.
 
 ### User Deactivation
