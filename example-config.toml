@@ -1,8 +1,6 @@
 [source.keycloak_api]
 url = "https://keycloak.giz.berlin/auth"
 realm = "giz-playground"
-# Optional, number of users fetched per request
-fetch_users_num = 20
 
 # Optional
 [sentry]
