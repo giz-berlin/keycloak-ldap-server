@@ -4,7 +4,7 @@
 use anyhow::Context;
 
 #[derive(Debug, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RoundcubeConfig {
     /// Attribute names in source groups and users corresponding to teams, groups and users in James.
     /// Only source groups that have the James team or group attribute will be synced to James.
