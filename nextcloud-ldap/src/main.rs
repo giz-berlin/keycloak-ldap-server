@@ -14,10 +14,10 @@ impl giz_ldap_lib::interface::Target for Target {
     }
 
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
-        ldap_entry.set_attribute("entryuuid", vec![user.id.context("user id missing")?]);
+        ldap_entry.set_attribute("entryUuid", vec![user.id.context("user id missing")?]);
         ldap_entry.set_attribute("username", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute(
-            "displayname",
+            "displayName",
             vec![format!(
                 "{} {}",
                 user.first_name.clone().context("first_name missing")?,
@@ -32,13 +32,15 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(())
     }
 
-    fn extract_group(&self, _group: GroupRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_group(&self, group: GroupRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute(
             "entryUuid",
             // If this unwrap fails, our implementation is broken because we always set the ou as the
             // identifier of the group.
             ldap_entry.get_attribute("ou").unwrap().clone(),
         );
+
+        ldap_entry.set_attribute("cn", vec![group.path.context("Group path is None")?]);
         Ok(())
     }
 }
