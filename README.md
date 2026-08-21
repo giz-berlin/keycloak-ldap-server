@@ -124,3 +124,7 @@ As LDAP bind authentication, you should configure the client credentials of a Ke
 The default keycloak instance will have a client `ldap_bridge` with secret `ldap_bridge_secret` properly set up.
 
 Note that the API will only return groups if the use-case-specific binary you run is starting the LDAP server with `include_group_info=true`.
+
+## Support development ❤️
+
+The development is mainly funded by [Gesellschaft für interkulturelles Zusammenleben gGmbH](https://giz.berlin) and [Mixxplorer](https://mixxplorer.de) . If you're able to support our work, please consider [sponsoring GIZ](https://giz.berlin/about-giz/spenden.htm) (we are a non-profit) or encouraging your organization to have [Mixxplorer](https://mixxplorer.de) implement free software projects like this one.
