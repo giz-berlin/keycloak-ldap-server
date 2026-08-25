@@ -152,7 +152,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "groups",
                 self.client
-                    .realm_groups_get(&self.target_realm, Some(false), None, None, None, Some(true), None, None, None)
+                    .realm_groups_get(&self.target_realm, Some(false), None, None, Some(-1), Some(true), None, None, None)
                     .await,
                 |group| group.id.is_some() && group.name.is_some(),
             )
@@ -174,7 +174,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "users_in_group",
                 self.client
-                    .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, None)
+                    .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, Some(-1))
                     .await,
                 ServiceAccountClient::retain_everything,
             )
