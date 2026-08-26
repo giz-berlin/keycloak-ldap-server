@@ -15,6 +15,8 @@ RUN echo $REMOTE_USER ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$REMOTE_USER
 
 USER $REMOTE_USER
 
+ARG RUSTFLAGS="-Dunused-crate-dependencies"
+
 RUN rustup component add rustfmt
 RUN rustup component add clippy
 RUN cargo install cargo-audit --locked --features=fix
