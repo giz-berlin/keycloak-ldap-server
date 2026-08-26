@@ -1,5 +1,7 @@
 [package]
 name = "printer-ldap"
+description = "Printer LDAP server — models a user directory by answering LDAP queries with user information fetched from Keycloak, providing group-free attribute sets for printer user enumeration workflows"
+homepage = "https://rechenknecht.net/giz/keycloak/keycloak-ldap-server/-/tree/main/printer-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false

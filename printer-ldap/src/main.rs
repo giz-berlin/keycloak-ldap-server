@@ -2,7 +2,6 @@
 #![deny(clippy::all)]
 
 use anyhow::Context;
-use giz_ldap_lib::{dto, server};
 use keycloak::types::UserRepresentation;
 
 pub struct Target;
@@ -14,7 +13,7 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(Self {})
     }
 
-    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("displayName", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
         ldap_entry.set_attribute(
@@ -39,5 +38,5 @@ impl giz_ldap_lib::interface::Target for Target {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(giz_ldap_lib::constants::GroupStrategy::NoGroupInfo).await
+    giz_ldap_lib::server_run!(Target, giz_ldap_lib::constants::GroupStrategy::NoGroupInfo)
 }

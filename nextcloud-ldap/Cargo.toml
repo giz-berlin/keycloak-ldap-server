@@ -1,5 +1,7 @@
 [package]
 name = "nextcloud-ldap"
+description = "Nextcloud LDAP server — synchronizes users and groups from Keycloak to provide Nextcloud-compatible LDAP attribute sets for user and group enumeration workflows"
+homepage = "https://rechenknecht.net/giz/keycloak/keycloak-ldap-server/-/tree/main/nextcloud-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false

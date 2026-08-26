@@ -1,5 +1,7 @@
 [package]
 name = "roundcube-ldap"
+description = "Roundcube LDAP server — synchronizes users and groups from Keycloak to provide Roundcube-compatible LDAP attribute sets including mail aliases, team mailboxes, and list group memberships. Used in combination with James."
+homepage = "https://rechenknecht.net/giz/keycloak/keycloak-ldap-server/-/tree/main/roundcube-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false

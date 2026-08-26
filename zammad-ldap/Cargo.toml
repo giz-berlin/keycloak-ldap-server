@@ -1,5 +1,7 @@
 [package]
 name = "zammad-ldap"
+description = "Zammad LDAP server — synchronizes users from Keycloak to provide Zammad-compatible LDAP attribute sets, skipping disabled users"
+homepage = "https://gitlab.com/leonard/marschke/keycloak-ldap-server/-/tree/main/zammad-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false

@@ -2,7 +2,7 @@
 #![deny(clippy::all)]
 
 use anyhow::Context;
-use giz_ldap_lib::{dto, server};
+use giz_ldap_lib::dto;
 use keycloak::types::UserRepresentation;
 
 pub struct Target;
@@ -30,5 +30,5 @@ impl giz_ldap_lib::interface::Target for Target {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(giz_ldap_lib::constants::GroupStrategy::SubgroupMembers).await
+    giz_ldap_lib::server_run!(Target, giz_ldap_lib::constants::GroupStrategy::SubgroupMembers)
 }

@@ -2,7 +2,6 @@
 #![deny(clippy::all)]
 
 use anyhow::Context;
-use giz_ldap_lib::{dto, server};
 use keycloak::types::{GroupRepresentation, UserRepresentation};
 
 pub struct Target;
@@ -14,7 +13,7 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(Self {})
     }
 
-    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("entryuuid", vec![user.id.context("user id missing")?]);
         ldap_entry.set_attribute("username", vec![user.username.context("username missing")?]);
         ldap_entry.set_attribute(
@@ -33,7 +32,7 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(())
     }
 
-    fn extract_group(&self, _group: GroupRepresentation, ldap_entry: &mut dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_group(&self, _group: GroupRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute(
             "entryUuid",
             // If this unwrap fails, our implementation is broken because we always set the ou as the
@@ -46,5 +45,5 @@ impl giz_ldap_lib::interface::Target for Target {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start_ldap_server::<Target>(giz_ldap_lib::constants::GroupStrategy::DirectMembers).await
+    giz_ldap_lib::server_run!(Target, giz_ldap_lib::constants::GroupStrategy::DirectMembers)
 }
