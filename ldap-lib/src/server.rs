@@ -17,7 +17,6 @@ use uuid::Uuid;
 
 use crate::{caching, keycloak_service_account, proto, tls};
 
-/// KIDS - Keycloak LDAP Server
 #[derive(Debug)]
 pub struct CliArguments {
     pub config: std::path::PathBuf,
@@ -128,7 +127,7 @@ macro_rules! server_run {
             env!("CARGO_PKG_NAME"),
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_AUTHORS"),
-            concat!("KIDS - Keycloak LDAP Server: ", env!("CARGO_PKG_NAME")),
+            concat!("Keycloak LDAP Server: ", env!("CARGO_PKG_NAME")),
             env!("CARGO_PKG_DESCRIPTION"),
             concat!("See also the project website at ", env!("CARGO_PKG_HOMEPAGE")),
         );
