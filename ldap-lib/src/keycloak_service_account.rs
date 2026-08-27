@@ -123,9 +123,9 @@ mod client {
                         None,
                         None,
                         None,
+                        None,
+                        None,
                         // see https://github.com/keycloak/keycloak/blob/cd9345bc710345293b5e8be83077a4e99e274955/model/jpa/src/main/java/org/keycloak/models/jpa/PaginationUtils.java#L36 for relevant code path
-                        None,
-                        None,
                         Some(-1),
                         None,
                         None,

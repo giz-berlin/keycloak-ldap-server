@@ -1446,7 +1446,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "giz-ldap-lib",
- "keycloak",
  "tokio",
 ]
 
@@ -1850,7 +1849,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "giz-ldap-lib",
- "keycloak",
  "tokio",
 ]
 
@@ -2094,7 +2092,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "giz-ldap-lib",
- "keycloak",
  "serde",
  "tokio",
  "tracing",
@@ -3694,7 +3691,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "giz-ldap-lib",
- "keycloak",
  "tokio",
 ]
 
