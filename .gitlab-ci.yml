@@ -63,6 +63,14 @@ test:
         coverage_format: cobertura
         path: target/llvm-cov/cobertura.xml
 
+lint-cargo-toml:
+  stage: test
+  needs: []
+  before_script:
+    - cargo install cargo-sort
+  script:
+    - cargo sort --check --workspace && echo "Cargo.toml formatted correctly ✅"
+
 .e2e-test:
   stage: test
   needs:

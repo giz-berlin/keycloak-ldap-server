@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 anyhow = "~1.0.102"
-giz-ldap-lib = { path="../ldap-lib" }
+giz-ldap-lib = { path = "../ldap-lib" }
 keycloak = "~26.5.200"
 serde = { version = "1.0.218", features = ["serde_derive"] }
 tokio = { version = "~1.50.0", features = ["io-util"] }
