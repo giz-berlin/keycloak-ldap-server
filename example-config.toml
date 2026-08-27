@@ -3,29 +3,29 @@ url = "https://keycloak.giz.berlin/auth"
 realm = "giz-playground"
 
 # Optional
-[sentry]
-dsn = "your-dsn"
-environment = "your-environment-this-binary-is-running-in"
+#[sentry]
+#dsn = "your-dsn"
+#environment = "your-environment-this-binary-is-running-in"
 
 [ldap_server]
 # Optional, the base point of our LDAP tree
-base_distinguished_name = "dc=giz,dc=berlin"
+#base_distinguished_name = "dc=giz,dc=berlin"
 # Optional, the name of the organization as shown by the LDAP base entry
-organization_name = "giz.berlin"
+#organization_name = "giz.berlin"
 # Optional, bind address with port
-bind_address = "[::]:3000"
+#bind_address = "[::]:3000"
 # Optional, whether to disable the secure LDAP access and enable unencrypted access
 disable_ldaps = false
 # Optional, the TLS certificate used by the LDAP server if LDAPS is enabled
-certificate = "certificates/ldap.pem"
+#certificate = "certificates/ldap.pem"
 # Optional, the TLS certificate private key used by the LDAP server if LDAPS is enabled
-certificate_key = "certificates/ldap.key"
+#certificate_key = "certificates/ldap.key"
 
 # Optional, time to wait before sending first response in a session in milliseconds because some client implementations will miss the first response if it comes in too fast.
-session_first_answer_delay_millis = 0
+#session_first_answer_delay_millis = 0
 
 # Optional, how often to update entries in the LDAP cache in seconds. WARNING: If client credentials are changed in the keycloak, the old secret/password will still stay valid for this long!
-cache_update_interval_secs = 60
+#cache_update_interval_secs = 60
 
 # How long to wait in seconds before pruning LDAP cache entries that are not being accessed.
 cache_entry_max_inactive_secs = 3600

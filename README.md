@@ -19,36 +19,12 @@ WARNING: Due to caching, when changing the credentials of a client in the keyclo
 
 Currently, this service is intended to provide the following use cases:
 
-- [implemented] providing a list of E-Mail addresses to printers
-- providing an address book, for example to mail clients
-- [implemented] informing the NextCloud about active users, so that deactivated users can be removed
-- informing the locking system about user roles/group memberships
-- [implemented] informing Zammad about active users and their groups for a role sync
+- [Printer](./printer-ldap/): Providing a list of E-Mail addresses to printers
+- [Nextcloud](./nextcloud-ldap/): Use Keycloak as a user and group base for Nextcloud
+- [Roundcube](./roundcube-ldap/): Providing an address book, for example to mail clients
+- [Zammad](./zammad-ldap/): Informing Zammad about active users and their groups for a role sync
 
-### Creating a binary for a new use case
-
-To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
-and add it to the [workspace members](Cargo.toml).
-There, you should create a new implementation of the `giz_ldap_lib::interface::Target` trait, which allows you to configure
-which source (Keycloak) attributes will be exposed by the LDAP user and group entries.
-
-As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
-```rust
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let include_group_info = true;
-   giz_ldap_lib::server::start_ldap_server::<YourNewTarget>(include_group_info).await
-}
-```
-
-See [the printer-specific implementation](printer-ldap) for an example.
-
-NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`),
-this service REPLACES all `/` characters in a group name with `_`.
-
-In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
-
-### Running the API
+## Running the API
 
 ### Configuration
 
@@ -71,6 +47,8 @@ For production, you should request a certificate for example using [LetsEncrypt]
 
 This repository contains multiple use-case specific binaries, for example `printer-ldap`.
 
+### Starting LDAP server
+
 You can start the API using one of the following ways.
 Substitute `{target_binary}` with the name of the use-case specific binary you want to run.
 
@@ -78,7 +56,10 @@ Substitute `{target_binary}` with the name of the use-case specific binary you w
 
     ```shell
     docker run --init -it --rm -p 0.0.0.0:3000:3000 -v ./certificates:/certificates --name ldap-server \
-        dr.rechenknecht.net/giz/keycloak/keycloak-ldap-server/main/{target_binary}:latest
+        -v ./config.toml:config.toml dr.rechenknecht.net/giz/keycloak/keycloak-ldap-server/main/{target_binary}:latest
+    # or without TLS
+    docker run --init -it --rm -p 0.0.0.0:3000:3000 --name ldap-server \
+        -v ./config.toml:config.toml dr.rechenknecht.net/giz/keycloak/keycloak-ldap-server/main/{target_binary}:latest
     ```
 
 - **Building the binary locally**:
@@ -99,6 +80,22 @@ The API should now be available at `ldaps://0.0.0.0:3000`. To see all available 
 
 If you want to run the API under the typical LDAPS port (636), you will need to have root permissions or
 [use some other way to bind to a privileged port](https://stackoverflow.com/questions/413807/is-there-a-way-for-non-root-processes-to-bind-to-privileged-ports-on-linux).
+
+### Binding clients
+
+The LDAP server authenticates to Keycloak via the username and password the client is sending to the LDAP server. Therefore, you must configure these credentials on the LDAP client.
+
+#### Obtaining Keycloak Credentials
+
+1. Go to the Keycloak admin panel.
+1. Create a new client, named e.g. `ldap-server`.
+1. Enable "Client authentication"
+1. Enable only "Service account roles" in section "Authentication flows".
+1. Create client
+1. Go to tab "Service account roles" in client settings.
+1. Assign role `realm-management: view-users`.
+
+Now, use the client ID as username and the client secret (obtained in tab "Credentials") as password. The LDAP server will automatically exchange these for a Keycloak token to access the admin API.
 
 ### Logging configuration
 
@@ -124,6 +121,33 @@ As LDAP bind authentication, you should configure the client credentials of a Ke
 The default keycloak instance will have a client `ldap_bridge` with secret `ldap_bridge_secret` properly set up.
 
 Note that the API will only return groups if the use-case-specific binary you run is starting the LDAP server with `include_group_info=true`.
+
+## Development
+
+This repository features a devcontainer containing all development dependencies.
+
+### Creating a binary for a new use case
+
+To create a binary for a new use case, create a new subfolder and initialize a new cargo project with a local dependency to `giz-ldap-lib`
+and add it to the [workspace members](Cargo.toml).
+There, you should create a new implementation of the `giz_ldap_lib::interface::Target` trait, which allows you to configure
+which source (Keycloak) attributes will be exposed by the LDAP user and group entries.
+
+As the LDAP library will handle argument parsing and logging, your main function should simply look like this:
+```rust
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let include_group_info = true;
+   giz_ldap_lib::server::start_ldap_server::<YourNewTarget>(include_group_info).await
+}
+```
+
+See [the printer-specific implementation](printer-ldap) for an example.
+
+NOTE: In order to prevent ambiguity regarding subgroups (to differentiate between a group `Test/Test` and a group `Test` with a subgroup `Test`),
+this service REPLACES all `/` characters in a group name with `_`.
+
+In order to build a docker container for your new use-case binary, modify the `pack` step in the `.gitlab-ci.yml` accordingly.
 
 ## Support development ❤️
 
