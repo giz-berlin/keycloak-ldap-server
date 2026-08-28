@@ -20,7 +20,7 @@ build:
   stage: build
   <<: *build_matrix
   script:
-    - cargo build --release --bin $BINARY
+    - RUSTFLAGS="-Dunused-crate-dependencies"  cargo build --release --bin $BINARY
     # We store the version number here as the binary does not run with other Linux variants
     # (like this is built with GNU libc and the container with musl libc)
     - target/release/$BINARY -V > target/release/${BINARY}-version
@@ -62,6 +62,14 @@ test:
       coverage_report:
         coverage_format: cobertura
         path: target/llvm-cov/cobertura.xml
+
+lint-cargo-toml:
+  stage: test
+  needs: []
+  before_script:
+    - cargo install cargo-sort
+  script:
+    - cargo sort --check --workspace && echo "Cargo.toml formatted correctly ✅"
 
 .e2e-test:
   stage: test

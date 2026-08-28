@@ -8,26 +8,75 @@ use std::{
 };
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{ArgMatches, Command};
 use futures_util::{SinkExt, StreamExt};
 use ldap3_proto::{LdapCodec, LdapResultCode};
 use openssl::ssl::{Ssl, SslAcceptor};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use crate::{caching, keycloak_service_account, proto, server, tls};
+use crate::{caching, keycloak_service_account, proto, tls};
 
-#[derive(Parser, Debug)]
-#[command(author, version)]
-/// A simple LDAP server modeling a user directory by answering LDAP queries with user information fetched from a Keycloak server.
-/// The LDAP clients will authenticate with the credentials of a keycloak client and are thus shown the users this
-/// keycloak client has access to.
-struct CliArguments {
-    #[clap(long, short, default_value = "config.toml", help = "Path to the config file")]
-    config: std::path::PathBuf,
+#[derive(Debug)]
+pub struct CliArguments {
+    pub config: std::path::PathBuf,
+    pub log_level: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
+}
 
-    #[clap(flatten)]
-    log_level: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
+impl CliArguments {
+    /// Parse [`CliArguments`] from clap [`ArgMatches`].
+    pub fn from_arg_matches(matches: &ArgMatches) -> anyhow::Result<Self> {
+        let config = matches
+            .get_one::<String>("config")
+            .map(std::path::PathBuf::from)
+            .context("failed to parse config path argument")?;
+
+        // Parse the log level from clap-verbosity-flag's verbosity arguments.
+        // clap_verbosity_flag registers -v/--verbose (counts up) and -q/--quiet (counts down).
+        let verbose = matches.get_count("verbose");
+        let quiet = matches.get_count("quiet");
+        let log_level = clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::new(verbose, quiet);
+
+        Ok(CliArguments { config, log_level })
+    }
+}
+
+/// Build a default clap [`Command`].
+/// Pass all string arguments as `env!("CARGO_PKG_*")` from your binary crate.
+pub fn parse_command(
+    name: &'static str,
+    version: &'static str,
+    author: &'static str,
+    about: &'static str,
+    long_about: &'static str,
+    homepage: &'static str,
+) -> Command {
+    Command::new(name)
+        .version(version)
+        .author(author)
+        .about(about)
+        .long_about(long_about)
+        .after_help(homepage)
+        .arg(
+            clap::Arg::new("config")
+                .long("config")
+                .short('c')
+                .default_value("config.toml")
+                .value_name("FILE")
+                .help("Path to the config file"),
+        )
+        .arg(
+            clap::Arg::new("verbose")
+                .short('v')
+                .action(clap::ArgAction::Count)
+                .help("Increase logging verbosity (can be repeated: -v, -vv, -vvv)"),
+        )
+        .arg(
+            clap::Arg::new("quiet")
+                .short('q')
+                .action(clap::ArgAction::Count)
+                .help("Decrease logging verbosity (can be repeated: -q, -qq, -qqq)"),
+        )
 }
 
 #[derive(Debug)]
@@ -56,19 +105,46 @@ impl Display for LdapClientSession {
     }
 }
 
-/// Run the LDAP server.
+/// Convenience macro that parses CLI arguments using the *calling crate's*
+/// `CARGO_PKG_NAME`, `CARGO_PKG_VERSION`, `CARGO_PKG_AUTHORS`,
+/// `CARGO_PKG_DESCRIPTION` and `CARGO_PKG_HOMEPAGE` environment variables,
+/// then runs the LDAP server with the given target type.
 ///
-/// This method is meant to be the ONLY method called from the main function
-/// of a derived binary. It will handle argument parsing and setup logging, which the derived binary
-/// is expected to NOT do itself.
+/// Most binary crates should use this macro in their `main()` body instead of
+/// writing argument parsing manually. The version and name shown in `--help`
+/// come from each crate's own Cargo.toml via `CARGO_PKG_*` env vars.
 ///
-/// As the concrete user and group information needed depends on the specific use case,
-/// this method is templated via the Generic [Target](crate::interface::Target) interface.
-///
-/// This method also allows configuring whether group information should be provided as well.
-pub async fn start_ldap_server<T: crate::interface::Target>(group_strategy: crate::constants::GroupStrategy) -> anyhow::Result<()> {
-    let args = server::CliArguments::parse();
+/// # Example
+/// ```ignore
+/// fn main() -> anyhow::Result<()> {
+///     giz_ldap_lib::cli_run!(Target, giz_ldap_lib::constants::GroupStrategy::SubgroupMembers)
+/// }
+/// ```
+#[macro_export]
+macro_rules! server_run {
+    ($target:path, $strategy:expr) => {{
+        let command = $crate::server::parse_command(
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_AUTHORS"),
+            concat!("Keycloak LDAP Server: ", env!("CARGO_PKG_NAME")),
+            env!("CARGO_PKG_DESCRIPTION"),
+            concat!("See also the project website at ", env!("CARGO_PKG_HOMEPAGE")),
+        );
+        let matches = command.get_matches();
+        let args = $crate::server::CliArguments::from_arg_matches(&matches)?;
+        $crate::server::start_ldap_server_with_args::<$target>($strategy, args).await
+    }};
+}
 
+/// Run the LDAP server with pre-parsed CLI arguments.
+///
+/// Most binary crates should use the [`server_run!`] macro instead, which handles
+/// argument parsing using that crate's own `CARGO_PKG_*` environment variables.
+pub async fn start_ldap_server_with_args<T: crate::interface::Target>(
+    group_strategy: crate::constants::GroupStrategy,
+    args: CliArguments,
+) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         // Use configured log level for our library, and WARN for everything else.
         .with_env_filter(

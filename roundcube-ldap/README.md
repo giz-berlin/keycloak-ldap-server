@@ -1,5 +1,7 @@
 # Roundcube LDAP adapter for shared address book
 
+LDAP server adapter to feed in user data with mails and groups from Keycloak to Roundcube, given Keycloak is being used for a James deployment like done in [Postamt](https://rechenknecht.net/mail/postamt).
+
 ## Run server
 
 `roundcube-ldap --config example-config.toml`

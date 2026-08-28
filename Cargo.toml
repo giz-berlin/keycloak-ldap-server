@@ -1,9 +1,3 @@
 [workspace]
 resolver = "3"
-members = [
-    "ldap-lib",
-    "printer-ldap",
-    "nextcloud-ldap",
-    "roundcube-ldap",
-    "zammad-ldap",
-]
+members = ["ldap-lib", "nextcloud-ldap", "printer-ldap", "roundcube-ldap", "zammad-ldap"]

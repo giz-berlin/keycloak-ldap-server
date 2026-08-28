@@ -1,12 +1,14 @@
 [package]
 name = "roundcube-ldap"
+description = "Roundcube LDAP server — synchronizes users and groups from Keycloak to provide Roundcube-compatible LDAP attribute sets including mail aliases, team mailboxes, and list group memberships. Used in combination with James."
+homepage = "https://rechenknecht.net/giz/keycloak/keycloak-ldap-server/-/tree/main/roundcube-ldap"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [dependencies]
 anyhow = "~1.0.102"
-giz-ldap-lib = { path="../ldap-lib" }
+giz-ldap-lib = { path = "../ldap-lib" }
 keycloak = "~26.5.200"
 serde = { version = "1.0.218", features = ["serde_derive"] }
 tokio = { version = "~1.50.0", features = ["io-util"] }
