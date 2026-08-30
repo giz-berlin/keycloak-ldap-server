@@ -34,7 +34,7 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(Self { config })
     }
 
-    fn extract_user(&self, user: keycloak::types::UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_user(&self, user: giz_ldap_lib::deps::keycloak::types::UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         // skip all disabled users as those are not reachable via mail anyways
         if !user.enabled.context("enabled missing")? {
             anyhow::bail!("User disabled!")
@@ -90,7 +90,11 @@ impl giz_ldap_lib::interface::Target for Target {
         Ok(())
     }
 
-    fn extract_group(&self, group: keycloak::types::GroupRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
+    fn extract_group(
+        &self,
+        group: giz_ldap_lib::deps::keycloak::types::GroupRepresentation,
+        ldap_entry: &mut giz_ldap_lib::dto::LdapEntry,
+    ) -> anyhow::Result<()> {
         ldap_entry.set_attribute(
             "entryUuid",
             // If this unwrap fails, our implementation is broken because we always set the ou as the

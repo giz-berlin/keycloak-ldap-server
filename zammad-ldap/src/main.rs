@@ -2,8 +2,7 @@
 #![deny(clippy::all)]
 
 use anyhow::Context;
-use giz_ldap_lib::dto;
-use keycloak::types::UserRepresentation;
+use giz_ldap_lib::{deps::keycloak::types::UserRepresentation, dto};
 
 pub struct Target;
 

@@ -80,7 +80,7 @@ lint-cargo-toml:
         matrix:
           - BINARY: *binaries
   services:
-    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:25.0
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/keycloak/keycloak:26.7
       alias: keycloak
       command: ["start-dev", "--import-realm"]
       entrypoint:
