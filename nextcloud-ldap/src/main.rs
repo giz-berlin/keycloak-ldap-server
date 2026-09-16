@@ -40,7 +40,12 @@ impl giz_ldap_lib::interface::Target for Target {
             ldap_entry.get_attribute("ou").unwrap().clone(),
         );
 
-        ldap_entry.set_attribute("cn", vec![group.path.context("Group path is None")?]);
+        let full_path = group.path.context("Group path is None")?;
+        let trimmed_path = full_path
+            .strip_prefix('/')
+            .with_context(|| format!("Group path does not start with /, stopping as we must prevent duplications, {full_path}"))?;
+
+        ldap_entry.set_attribute("cn", vec![trimmed_path.into()]);
         Ok(())
     }
 }
