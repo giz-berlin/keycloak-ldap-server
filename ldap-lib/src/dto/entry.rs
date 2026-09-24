@@ -2,12 +2,11 @@ use std::{collections::HashMap, string::ToString};
 
 use itertools::Itertools;
 use ldap3_proto::{LdapFilter, LdapPartialAttribute, LdapResultCode, LdapSearchResultEntry, LdapSearchScope, SearchRequest, proto::LdapSubstringFilter};
-use regex::Regex;
 
 use crate::proto;
 
-const FILTER_MAX_DEPTH: usize = 5;
-const FILTER_MAX_ELEMENTS: usize = 10;
+const FILTER_MAX_DEPTH: usize = 10;
+const FILTER_MAX_ELEMENTS: usize = 20;
 
 /// A data class representing an entry in our directory.
 pub struct LdapEntry {
@@ -128,7 +127,7 @@ impl LdapEntry {
         if results.is_empty() {
             return Err(proto::LdapError(
                 LdapResultCode::NoSuchObject,
-                "LDAP Search failure - invalid basedn or too deep nesting".to_string(),
+                "LDAP Search failure - no matched entry".to_string(),
             ));
         }
         Ok(results)
@@ -239,7 +238,7 @@ impl LdapEntry {
                         regex += "$"
                     }
                     // This should not fail, as the search values are fully escaped and the remaining RegEx is valid
-                    let substr_filter = Regex::new(regex.as_str()).unwrap();
+                    let substr_filter = regex::RegexBuilder::new(regex.as_str()).case_insensitive(true).build().unwrap();
                     Ok(values.iter().any(|value| substr_filter.is_match(value)))
                 } else {
                     // If the attribute does not even exist, we have no match.
