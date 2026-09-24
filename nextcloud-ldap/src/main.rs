@@ -16,6 +16,7 @@ impl giz_ldap_lib::interface::Target for Target {
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("entryUuid", vec![user.id.context("user id missing")?]);
         ldap_entry.set_attribute("username", vec![user.username.context("username missing")?]);
+        ldap_entry.set_attribute("active", vec![if user.enabled.context("Enabled attribute missing")? { "TRUE".to_owned() } else { "FALSE".to_owned() }]);
         ldap_entry.set_attribute(
             "displayName",
             vec![format!(
