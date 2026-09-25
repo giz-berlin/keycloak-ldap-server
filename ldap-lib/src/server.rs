@@ -328,8 +328,10 @@ where
             proto::LdapResponseState::MultiPartRespond(messages) => {
                 for return_message in messages.into_iter() {
                     tracing::trace!(%session, ?return_message, "Sending protocol answer");
-                    ldap_writer.send(return_message).await?;
+                    ldap_writer.feed(return_message).await?;
                 }
+                ldap_writer.flush().await?;
+                tracing::trace!(%session, "Flushed connection after last response");
             }
             proto::LdapResponseState::Disconnect(return_message) => {
                 ldap_writer.send(return_message).await?;

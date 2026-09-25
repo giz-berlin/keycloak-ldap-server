@@ -50,12 +50,17 @@ impl<T: crate::interface::Target> LdapHandler<T> {
                     .do_search(&session.id, &sr, bound_user)
                     .await
                     .map(LdapResponseState::MultiPartRespond)
-                    .unwrap_or_else(|e| {
-                        tracing::error!(%session, search_request = ?sr, error = ?e, "Error performing search request");
-                        if let LdapResultCode::InvalidCredentials = e.0 {
-                            LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(e.0, e.1.as_str()))
+                    .unwrap_or_else(|error| {
+                        // Do not log empty search responses as error
+                        if error.0 == LdapResultCode::NoSuchObject {
+                            tracing::debug!(%session, search_request = ?sr, error = ?error, "Error performing search request");
                         } else {
-                            LdapResponseState::MultiPartRespond(vec![sr.gen_error(e.0, e.1.to_string())])
+                            tracing::error!(%session, search_request = ?sr, error = ?error, "Error performing search request");
+                        }
+                        if let LdapResultCode::InvalidCredentials = error.0 {
+                            LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(error.0, error.1.as_str()))
+                        } else {
+                            LdapResponseState::MultiPartRespond(vec![sr.gen_error(error.0, error.1.to_string())])
                         }
                     }),
                 None => LdapResponseState::MultiPartRespond(vec![sr.gen_error(LdapResultCode::OperationsError, "Must authenticate first!".to_string())]),

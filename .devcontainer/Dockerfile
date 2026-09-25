@@ -1,7 +1,7 @@
 FROM rust:1
 
 RUN apt-get update
-RUN apt-get install -y sudo less
+RUN apt-get install -y sudo less ldap-utils
 
 ARG REMOTE_USER
 ARG REMOTE_UID
