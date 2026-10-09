@@ -165,7 +165,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "sub_groups",
                 self.client
-                    .realm_groups_with_group_id_children_get(&self.target_realm, group_id, Some(true), None, None, Some(-1), None, None)
+                    .realm_groups_with_group_id_children_get(&self.target_realm, group_id, Some(false), None, None, Some(-1), None, None)
                     .await,
                 ServiceAccountClient::retain_everything,
             )
