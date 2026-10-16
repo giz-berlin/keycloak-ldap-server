@@ -111,26 +111,10 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "users",
                 self.client
-                    .realm_users_get(
-                        &self.target_realm,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        // see https://github.com/keycloak/keycloak/blob/cd9345bc710345293b5e8be83077a4e99e274955/model/jpa/src/main/java/org/keycloak/models/jpa/PaginationUtils.java#L36 for relevant code path
-                        Some(-1),
-                        None,
-                        None,
-                        None,
-                    )
+                    .realm(&self.target_realm)
+                    .users_get()
+                    // see https://github.com/keycloak/keycloak/blob/cd9345bc710345293b5e8be83077a4e99e274955/model/jpa/src/main/java/org/keycloak/models/jpa/PaginationUtils.java#L36 for relevant code path
+                    .max(-1)
                     .await,
                 ServiceAccountClient::retain_everything,
             )
@@ -141,12 +125,7 @@ mod client {
         /// Beware: Doing both requests subsequently could mean they are out of sync as other, modifying requests
         /// might be done in between.
         pub async fn count_users(&self) -> Result<i32, proto::LdapError> {
-            ServiceAccountClient::error_convert_resource(
-                "users/count",
-                self.client
-                    .realm_users_count_get(&self.target_realm, None, None, None, None, None, None, None, None, None, None, None, None, None)
-                    .await,
-            )
+            ServiceAccountClient::error_convert_resource("users/count", self.client.realm(&self.target_realm).users_count_get().await)
         }
 
         /// Query all groups in realm we configured for this client, disregarding groups that do not have an id or a name.
@@ -154,7 +133,11 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "groups",
                 self.client
-                    .realm_groups_get(&self.target_realm, Some(false), None, None, Some(-1), Some(true), None, None, None)
+                    .realm(&self.target_realm)
+                    .groups_get()
+                    .brief_representation(false)
+                    .max(-1)
+                    .populate_hierarchy(true)
                     .await,
                 |group| group.id.is_some() && group.name.is_some(),
             )
@@ -165,7 +148,10 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "sub_groups",
                 self.client
-                    .realm_groups_with_group_id_children_get(&self.target_realm, group_id, Some(false), None, None, Some(-1), None, None)
+                    .realm(&self.target_realm)
+                    .groups_with_group_id_children_get(group_id)
+                    .brief_representation(false)
+                    .max(-1)
                     .await,
                 ServiceAccountClient::retain_everything,
             )
@@ -176,7 +162,10 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "users_in_group",
                 self.client
-                    .realm_groups_with_group_id_members_get(&self.target_realm, group_id, Some(true), None, Some(-1))
+                    .realm(&self.target_realm)
+                    .groups_with_group_id_members_get(group_id)
+                    .brief_representation(true)
+                    .max(-1)
                     .await,
                 ServiceAccountClient::retain_everything,
             )
