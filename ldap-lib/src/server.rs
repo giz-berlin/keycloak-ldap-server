@@ -204,8 +204,7 @@ pub async fn start_ldap_server_with_args<T: crate::interface::Target>(
     let cache_configuration = caching::configuration::Configuration::<T> {
         keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(
             config.source.keycloak_api.url.clone(),
-            config.source.keycloak_api.realm.clone(),
-            config.source.keycloak_api.insecure_disable_tls_verification,
+            std::sync::Arc::new(config.source.keycloak_api.clone()),
         ),
         group_strategy,
         cache_update_interval: time::Duration::from_secs(config.ldap_server.cache_update_interval_secs),

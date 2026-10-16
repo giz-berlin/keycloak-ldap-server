@@ -7,37 +7,32 @@ use crate::proto;
 /// A builder to construct keycloak service account clients for a pre-configured Keycloak server and realm.
 pub struct ServiceAccountClientBuilder {
     keycloak_address: String,
-    realm: String,
-    insecure_disable_tls_verification: bool,
+    config: std::sync::Arc<crate::config::KeycloakApiConfig>,
 }
 
 impl ServiceAccountClientBuilder {
-    pub fn new(keycloak_address: String, realm: String, insecure_disable_tls_verification: bool) -> Self {
-        Self {
-            keycloak_address,
-            realm,
-            insecure_disable_tls_verification,
-        }
+    pub fn new(keycloak_address: String, config: std::sync::Arc<crate::config::KeycloakApiConfig>) -> Self {
+        Self { keycloak_address, config }
     }
 
     /// Construct a new client using provided service account credentials.
     /// Will verify that the credentials authenticate successfully.
     pub async fn new_service_account(&self, client_id: &str, client_secret: &str) -> Result<ServiceAccountClient, proto::LdapError> {
         let mut reqwest_builder = reqwest::Client::builder();
-        reqwest_builder = reqwest_builder.danger_accept_invalid_certs(self.insecure_disable_tls_verification);
+        reqwest_builder = reqwest_builder.danger_accept_invalid_certs(self.config.insecure_disable_tls_verification);
 
         // Note that the token we receive is not validated, but that might be fine in our case.
         // Also, since the acquire method is not public, we need to do some API request to validate we actually have a working client...
         let keycloak_client = keycloak::KeycloakServiceAccountAdminTokenRetriever::create_with_custom_realm(
             client_id,
             client_secret,
-            &self.realm,
+            &self.config.realm,
             reqwest_builder.build().unwrap(),
         );
 
         let service_account = ServiceAccountClient::new(
             keycloak::KeycloakAdmin::new(&self.keycloak_address, keycloak_client, reqwest::Client::new()),
-            self.realm.clone(),
+            self.config.clone(),
         );
 
         // Verify credentials are actually working
@@ -59,12 +54,15 @@ mod client {
     /// Used to retrieve user-information for a single realm.
     pub struct ServiceAccountClient {
         client: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>,
-        target_realm: String,
+        config: std::sync::Arc<crate::config::KeycloakApiConfig>,
     }
 
     impl ServiceAccountClient {
-        pub fn new(client: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>, target_realm: String) -> Self {
-            Self { client, target_realm }
+        pub fn new(
+            client: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>,
+            config: std::sync::Arc<crate::config::KeycloakApiConfig>,
+        ) -> Self {
+            Self { client, config }
         }
 
         /// Convert a keycloakError into an appropriate LdapError.
@@ -111,10 +109,15 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "users",
                 self.client
-                    .realm(&self.target_realm)
+                    .realm(&self.config.realm)
                     .users_get()
                     // see https://github.com/keycloak/keycloak/blob/cd9345bc710345293b5e8be83077a4e99e274955/model/jpa/src/main/java/org/keycloak/models/jpa/PaginationUtils.java#L36 for relevant code path
                     .max(-1)
+                    // This sets the query parameter `exact` if service accounts should be included. The value does not matter, it could also be `false`.
+                    // The parameter does not filter the users if other attributes such as components of the name are not given. However, because a
+                    // "filtering" attribute is set, Keycloak handles the request differently and includes service accounts in the result.
+                    // This is hacky and can hopefully be replaced when github.com/keycloak/keycloak/pull/51788 is merged.
+                    .exact(if self.config.fetch_service_accounts { Some(true) } else { None })
                     .await,
                 ServiceAccountClient::retain_everything,
             )
@@ -125,7 +128,18 @@ mod client {
         /// Beware: Doing both requests subsequently could mean they are out of sync as other, modifying requests
         /// might be done in between.
         pub async fn count_users(&self) -> Result<i32, proto::LdapError> {
-            ServiceAccountClient::error_convert_resource("users/count", self.client.realm(&self.target_realm).users_count_get().await)
+            let data = self
+                .client
+                .realm(&self.config.realm)
+                .users_count_get()
+                // This sets the query parameter `exact` if service accounts should be included. The value does not matter, it could also be `false`.
+                // The parameter does not filter the users if other attributes such as components of the name are not given. However, because a
+                // "filtering" attribute is set, Keycloak handles the request differently and includes service accounts in the result.
+                // This is hacky and can hopefully be replaced when github.com/keycloak/keycloak/pull/51788 is merged.
+                .exact(if self.config.fetch_service_accounts { Some(true) } else { None })
+                .await;
+
+            ServiceAccountClient::error_convert_resource("users/count", data)
         }
 
         /// Query all groups in realm we configured for this client, disregarding groups that do not have an id or a name.
@@ -133,7 +147,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "groups",
                 self.client
-                    .realm(&self.target_realm)
+                    .realm(&self.config.realm)
                     .groups_get()
                     .brief_representation(false)
                     .max(-1)
@@ -148,7 +162,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "sub_groups",
                 self.client
-                    .realm(&self.target_realm)
+                    .realm(&self.config.realm)
                     .groups_with_group_id_children_get(group_id)
                     .brief_representation(false)
                     .max(-1)
@@ -162,7 +176,7 @@ mod client {
             ServiceAccountClient::error_convert_vec_and_filter(
                 "users_in_group",
                 self.client
-                    .realm(&self.target_realm)
+                    .realm(&self.config.realm)
                     .groups_with_group_id_members_get(group_id)
                     .brief_representation(true)
                     .max(-1)
@@ -174,7 +188,7 @@ mod client {
 
     impl std::fmt::Debug for ServiceAccountClient {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Service account for realm '{}'", self.target_realm)
+            write!(f, "Service account for realm '{}'", self.config.realm)
         }
     }
 }
@@ -322,7 +336,10 @@ pub mod client {
 
     /// This impl MUST always follow the same method signature as the real implementation.
     impl MockServiceAccountClient {
-        pub fn new(_: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>, _: String) -> Self {
+        pub fn new(
+            _: keycloak::KeycloakAdmin<keycloak::KeycloakServiceAccountAdminTokenRetriever>,
+            _: std::sync::Arc<crate::config::KeycloakApiConfig>,
+        ) -> Self {
             // Take out the instance we configured earlier. Will take ownership of this instance, which means
             // this method may only be called once before we have to configure a new instance.
             // Luckily, one instance is all we need for the tests.

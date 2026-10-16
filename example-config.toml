@@ -1,6 +1,11 @@
 [source.keycloak_api]
 url = "https://keycloak.giz.berlin/auth"
 realm = "giz-playground"
+# Optional, Whether to validate the server certificate of the external API.
+# Only enable this insecure disable switch for local development purposes!
+# insecure_disable_tls_verification = false
+# Optional, whether service accounts should be fetched and handled like normal users.
+# fetch_service_accounts = false
 
 # Optional
 #[sentry]

@@ -272,7 +272,10 @@ pub(crate) mod test {
         #[default(crate::constants::GroupStrategy::NoGroupInfo)] group_strategy: crate::constants::GroupStrategy,
     ) -> configuration::Configuration<crate::interface::tests::DummyTarget> {
         configuration::Configuration {
-            keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new("".to_string(), "".to_string(), false),
+            keycloak_service_account_client_builder: keycloak_service_account::ServiceAccountClientBuilder::new(
+                "".to_string(),
+                std::sync::Arc::new(crate::config::KeycloakApiConfig::default()),
+            ),
             group_strategy,
             cache_update_interval: CACHE_UPDATE_INTERVAL,
             max_entry_inactive_time: MAX_ENTRY_INACTIVE_TIME,

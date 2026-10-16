@@ -25,7 +25,7 @@ pub struct SourceConfig {
     pub keycloak_api: KeycloakApiConfig,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeycloakApiConfig {
     /// Address of the external Keycloak to fetch data from.
@@ -35,6 +35,8 @@ pub struct KeycloakApiConfig {
     /// Whether to validate the server certificate of the external API.
     /// Only enable this insecure disable switch for local development purposes!
     pub insecure_disable_tls_verification: bool,
+    /// Whether service accounts should be fetched and handled like normal users.
+    pub fetch_service_accounts: bool,
 }
 
 impl Default for KeycloakApiConfig {
@@ -43,6 +45,7 @@ impl Default for KeycloakApiConfig {
             url: "https://keycloak.example.org".to_string(),
             realm: "company".to_string(),
             insecure_disable_tls_verification: false,
+            fetch_service_accounts: false,
         }
     }
 }
