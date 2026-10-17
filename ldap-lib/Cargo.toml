@@ -1,6 +1,6 @@
 [package]
 name = "giz-ldap-lib"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 publish = false
 
@@ -11,24 +11,24 @@ anyhow = "~1.0.102"
 async-recursion = "1.1.1"
 clap = "~4.6.0"
 clap-verbosity-flag = "~3.0.2"
-constant_time_eq = "0.4.2"
+constant_time_eq = "0.6.1"
 futures-util = { version = "~0.3.32", features = ["sink"] }
-itertools = "0.14.0"
+itertools = "0.15.0"
 keycloak = "~26.7.300"
-ldap3_proto = "~0.7.0"
+ldap3_proto = "~0.8.1"
 mockall_double = "~0.3.1"
 openssl = "~0.10.76"
-regex = "~1.12.3"
+regex = "~1.13.1"
 reqwest = "~0.13.2"
-sentry = { version = "0.47", features = ["tracing"] }
+sentry = { version = "0.49", features = ["tracing"] }
 serde = { version = "1.0.228", features = ["serde_derive"] }
-tokio = { version = "~1.50.0", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["io-util", "rt", "rt-multi-thread", "macros"] }
 tokio-openssl = "~0.6.5"
 tokio-util = "~0.7.18"
 toml = "1.0.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "~1.22.0", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-rstest = "~0.26.1"
+rstest = "~0.27.0"

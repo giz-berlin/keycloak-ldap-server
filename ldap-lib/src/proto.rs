@@ -58,7 +58,7 @@ impl<T: crate::interface::Target> LdapHandler<T> {
                             tracing::error!(%session, search_request = ?sr, error = ?error, "Error performing search request");
                         }
                         if let LdapResultCode::InvalidCredentials = error.0 {
-                            LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(error.0, error.1.as_str()))
+                            LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen_response(error.0, error.1.as_str()))
                         } else {
                             LdapResponseState::MultiPartRespond(vec![sr.gen_error(error.0, error.1.to_string())])
                         }
