@@ -164,22 +164,16 @@ pub async fn start_ldap_server_with_args<T: crate::interface::Target>(
     tracing::debug!("Starting with {config:?}");
 
     let _guard = if let Some(sentry_config) = config.sentry.as_ref() {
-        let dsn = sentry::types::Dsn::from_str(&sentry_config.dsn).map_err(|err| {
-            tracing::error!("Invalid Sentry DSN {}: {}", &sentry_config.dsn, err);
-            err
-        })?;
-
-        let guard = sentry::init(sentry::ClientOptions {
-            dsn: Some(dsn),
-            release: sentry::release_name!(),
-            environment: Some(sentry_config.environment.clone().into()),
-            attach_stacktrace: true,
+        let client_options = sentry::ClientOptions::new()
+            .dsn(&sentry_config.dsn)
+            .maybe_release(sentry::release_name!())
+            .environment(sentry_config.environment.clone())
+            .attach_stacktrace(true)
             // TODO: We may not want to have all transactions and thus set this to a lower value.
             // See https://docs.sentry.io/platforms/rust/tracing/
-            traces_sample_rate: 1.0,
-            in_app_include: vec!["kids"],
-            ..Default::default()
-        });
+            .traces_sample_rate(1.0);
+
+        let guard = sentry::init(client_options);
 
         Some(guard)
     } else {
@@ -307,7 +301,7 @@ where
                 tracing::debug!(msg_id, %session, operation = ?server_op, "Performing LDAP operation");
                 ldap.perform_ldap_operation(server_op, session).await
             }
-            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::r#gen(
+            Err(_) => proto::LdapResponseState::Disconnect(ldap3_proto::DisconnectionNotice::gen_response(
                 LdapResultCode::ProtocolError,
                 format!("Invalid Request in session {}: msg {}", session.id, msg_id).as_str(),
             )),
