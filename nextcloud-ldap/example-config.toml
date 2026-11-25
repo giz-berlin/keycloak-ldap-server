@@ -8,3 +8,4 @@ realm = "giz-playground"
 [target]
 # Optional, default shown here
 keycloak_phone_attr = "phone"
+keycloak_org_role_attr = "orgRole"
