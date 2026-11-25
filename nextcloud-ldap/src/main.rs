@@ -56,20 +56,13 @@ impl giz_ldap_lib::interface::Target for Target {
         ldap_entry.set_attribute("mail", vec![user.email.context("email missing")?]);
         ldap_entry.set_attribute("enabled", vec![user.enabled.context("enabled missing")?.to_string()]);
 
-        if let Some(phone_attrs) = user
-            .attributes
-            .as_ref()
-            .context("No user attributes sent")?
-            .get(&self.config.target.keycloak_phone_attr)
-        {
-            ldap_entry.set_attribute("phone", phone_attrs.to_vec());
-        }
-        if let Some(org_role_attrs) = user
-            .attributes
-            .context("No user attributes sent")?
-            .get(&self.config.target.keycloak_org_role_attr)
-        {
-            ldap_entry.set_attribute("orgRole", org_role_attrs.to_vec());
+        if let Some(attributes) = user.attributes {
+            if let Some(phone_attrs) = attributes.get(&self.config.target.keycloak_phone_attr) {
+                ldap_entry.set_attribute("phone", phone_attrs.to_vec());
+            }
+            if let Some(org_role_attrs) = attributes.get(&self.config.target.keycloak_org_role_attr) {
+                ldap_entry.set_attribute("orgRole", org_role_attrs.to_vec());
+            }
         }
 
         Ok(())
