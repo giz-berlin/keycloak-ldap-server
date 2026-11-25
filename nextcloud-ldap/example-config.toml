@@ -1,0 +1,10 @@
+[source.keycloak_api]
+url = "https://keycloak.giz.berlin/auth"
+realm = "giz-playground"
+
+[ldap_server]
+# check out general options in main Readme.
+
+[target]
+# Optional, default shown here
+keycloak_phone_attr = "phone"

@@ -26,7 +26,8 @@ The `nextcloud-ldap` use case provides an LDAP proxy to Keycloak which exports t
             - **Group Display Name Field**: Set this to `displayName` (should be the default) to show the groups including their full path in Keycloak
             - **Group-Member association**: `uniqueMember`
             - **Nested Groups**: yes
-            - **Special Attributes**: 
+        - **User Profile Attributes**
+            - **Phone Field**: `phone`, make sure to configure the correct Keycloak attribute in target config.
 1. In both the **Users** and the **Groups** tab, hit the "Verify settings and count" button and verify that the number of entities found matches with what you have in your Keycloak. Additionally, visit the "Accounts" page to find all of your users and groups.
 
 ### User Deactivation

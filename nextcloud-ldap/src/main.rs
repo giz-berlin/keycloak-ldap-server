@@ -4,13 +4,30 @@
 use anyhow::Context;
 use giz_ldap_lib::deps::keycloak::types::{GroupRepresentation, UserRepresentation};
 
-pub struct Target;
+#[derive(Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NextcloudConfig {
+    /// Attribute names in source for special fields
+    pub keycloak_phone_attr: String,
+}
+
+impl Default for NextcloudConfig {
+    fn default() -> Self {
+        Self {
+            keycloak_phone_attr: "phone".to_string(),
+        }
+    }
+}
+
+pub struct Target {
+    config: std::sync::Arc<giz_ldap_lib::config::Config<NextcloudConfig>>,
+}
 
 impl giz_ldap_lib::interface::Target for Target {
-    type TargetConfig = giz_ldap_lib::config::EmptyConfig;
+    type TargetConfig = NextcloudConfig;
 
-    fn new(_config: std::sync::Arc<giz_ldap_lib::config::Config<Self::TargetConfig>>) -> anyhow::Result<Self> {
-        Ok(Self {})
+    fn new(config: std::sync::Arc<giz_ldap_lib::config::Config<Self::TargetConfig>>) -> anyhow::Result<Self> {
+        Ok(Self { config })
     }
 
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
@@ -36,6 +53,10 @@ impl giz_ldap_lib::interface::Target for Target {
         ldap_entry.set_attribute("surname", vec![user.last_name.context("last name missing")?]);
         ldap_entry.set_attribute("mail", vec![user.email.context("email missing")?]);
         ldap_entry.set_attribute("enabled", vec![user.enabled.context("enabled missing")?.to_string()]);
+
+        if let Some(phone_attrs) = user.attributes.context("No user attributes sent")?.get(&self.config.target.keycloak_phone_attr) {
+            ldap_entry.set_attribute("phone", phone_attrs.to_vec());
+        }
 
         Ok(())
     }
