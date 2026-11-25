@@ -178,7 +178,7 @@ mod client {
                 self.client
                     .realm(&self.config.realm)
                     .groups_with_group_id_members_get(group_id)
-                    .brief_representation(true)
+                    .brief_representation(false)
                     .max(-1)
                     .await,
                 ServiceAccountClient::retain_everything,
