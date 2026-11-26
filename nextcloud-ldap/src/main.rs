@@ -34,7 +34,7 @@ impl giz_ldap_lib::interface::Target for Target {
 
     fn extract_user(&self, user: UserRepresentation, ldap_entry: &mut giz_ldap_lib::dto::LdapEntry) -> anyhow::Result<()> {
         ldap_entry.set_attribute("entryUuid", vec![user.id.context("user id missing")?]);
-        ldap_entry.set_attribute("username", vec![user.username.context("username missing")?]);
+        ldap_entry.set_attribute("username", vec![user.username.clone().context("username missing")?]);
         ldap_entry.set_attribute(
             "active",
             vec![if user.enabled.context("Enabled attribute missing")? {
@@ -43,16 +43,29 @@ impl giz_ldap_lib::interface::Target for Target {
                 "FALSE".to_owned()
             }],
         );
-        ldap_entry.set_attribute(
-            "displayName",
-            vec![format!(
-                "{} {}",
-                user.first_name.clone().context("first_name missing")?,
-                user.last_name.clone().context("last_name missing")?
-            )],
-        );
-        ldap_entry.set_attribute("givenName", vec![user.first_name.unwrap_or("".to_string())]);
-        ldap_entry.set_attribute("surname", vec![user.last_name.context("last name missing")?]);
+
+        match (&user.first_name, &user.last_name) {
+            (Some(first_name), Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![format!("{first_name} {last_name}")]);
+                ldap_entry.set_attribute("givenName", vec![first_name.clone()]);
+                ldap_entry.set_attribute("surname", vec![last_name.clone()]);
+            }
+            (Some(first_name), None) => {
+                ldap_entry.set_attribute("displayName", vec![first_name.clone()]);
+                ldap_entry.set_attribute("givenName", vec![first_name.clone()]);
+            }
+            (None, Some(last_name)) => {
+                ldap_entry.set_attribute("displayName", vec![last_name.clone()]);
+                ldap_entry.set_attribute("surname", vec![last_name.clone()]);
+            }
+            (None, None) => {
+                // Use the preferred username if no name component is present
+                let username = user.username.clone().expect("User has no names and no username");
+                ldap_entry.set_attribute("displayName", vec![username.clone()]);
+                ldap_entry.set_attribute("givenName", vec![username]);
+            }
+        }
+
         ldap_entry.set_attribute("mail", vec![user.email.context("email missing")?]);
         ldap_entry.set_attribute("enabled", vec![user.enabled.context("enabled missing")?.to_string()]);
 
